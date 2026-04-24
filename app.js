@@ -129,6 +129,8 @@ async function loadExample(val) {
             }
             
             virtualFS = fetchedFiles;
+            originalExampleContent = JSON.stringify(fetchedFiles); // Save original for 'Flash Cache'
+            
             currentFile = Object.keys(fetchedFiles).find(f => f === 'main.c' || f.endsWith('/main.c')) || Object.keys(fetchedFiles)[0];
             
             if (editor) {
@@ -452,6 +454,9 @@ connectBtn.onclick = (e) => {
 disconnectBtn.onclick = async () => {
     if (processor) {
         try {
+            if (!isProgramming || !processor) {
+                throw new Error("Programming aborted or connection lost.");
+            }
             await processor.disconnect();
             logmsg("USB device disconnected.", "info");
         } catch(e) {
@@ -516,67 +521,88 @@ flashBtn.onclick = async () => {
 
     try {
         logmsg("---------------------------------------");
-        logmsg("1/3 Sending code to Compiler API...", "warn");
         
         lastCompileMarkers = {};
         if (editor) monaco.editor.setModelMarkers(editor.getModel(), "compiler", []);
         
         saveCurrentFile();
-        const res = await fetch(`${CONFIG.API_URL}/compile`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ files: virtualFS })
-        });
         
-        if(!res.ok) {
-            const errLog = await res.json();
-            const rawError = errLog.details || '';
-            
-            // Parse GCC Errors
-            const lines = rawError.split('\n');
-            const regex = /(?:src|inc)\/([a-zA-Z0-9_\-\.]+):(\d+):.*?(error|warning):\s+(.*)/i;
-            
-            for (let line of lines) {
-                const match = line.match(regex);
-                if (match) {
-                    const [, filename, lineNum, severity, message] = match;
-                    if (!lastCompileMarkers[filename]) lastCompileMarkers[filename] = [];
-                    
-                    lastCompileMarkers[filename].push({
-                        startLineNumber: parseInt(lineNum, 10),
-                        startColumn: 1,
-                        endLineNumber: parseInt(lineNum, 10),
-                        endColumn: 1000,
-                        message: message,
-                        severity: severity.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error
-                    });
-                }
-            }
+        let binaryData = null;
+        const currentContent = JSON.stringify(virtualFS);
+        const isModified = currentContent !== originalExampleContent;
 
-            const errorFiles = Object.keys(lastCompileMarkers);
-            if (errorFiles.length > 0) {
-                if (!errorFiles.includes(currentFile)) {
-                    loadFile(errorFiles[0]); // auto-switch to first errored file
+        if (!isModified && typeof exampleSelector !== 'undefined' && exampleSelector.value) {
+            logmsg("Unmodified example detected. Using cached binary...", "warn");
+            try {
+                const binRes = await fetch(`examples/${exampleSelector.value}/firmware.bin`);
+                if (binRes.ok) {
+                    binaryData = await binRes.arrayBuffer();
                 } else {
-                    monaco.editor.setModelMarkers(editor.getModel(), "compiler", lastCompileMarkers[currentFile]);
+                    logmsg("Cache missing, falling back to compiler...", "warn");
                 }
+            } catch (e) {
+                logmsg("Cache fetch failed, falling back to compiler...", "warn");
             }
-            
-            logmsg("Error Reason:\n" + rawError, "error");
-            throw new Error("Compilation Failed");
         }
 
-        const binArrayBuffer = await res.arrayBuffer();
-        lastCompiledBinary = binArrayBuffer;
+        if (!binaryData) {
+            logmsg("1/3 Sending code to Compiler API...", "warn");
+            const res = await fetch(`${CONFIG.API_URL}/compile`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ files: virtualFS })
+            });
+            
+            if(!res.ok) {
+                const errLog = await res.json();
+                const rawError = errLog.details || '';
+                
+                // Parse GCC Errors
+                const lines = rawError.split('\n');
+                const regex = /(?:src|inc)\/([a-zA-Z0-9_\-\.]+):(\d+):.*?(error|warning):\s+(.*)/i;
+                
+                for (let line of lines) {
+                    const match = line.match(regex);
+                    if (match) {
+                        const [, filename, lineNum, severity, message] = match;
+                        if (!lastCompileMarkers[filename]) lastCompileMarkers[filename] = [];
+                        
+                        lastCompileMarkers[filename].push({
+                            startLineNumber: parseInt(lineNum, 10),
+                            startColumn: 1,
+                            endLineNumber: parseInt(lineNum, 10),
+                            endColumn: 1000,
+                            message: message,
+                            severity: severity.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error
+                        });
+                    }
+                }
+
+                const errorFiles = Object.keys(lastCompileMarkers);
+                if (errorFiles.length > 0) {
+                    if (!errorFiles.includes(currentFile)) {
+                        loadFile(errorFiles[0]); // auto-switch to first errored file
+                    } else {
+                        monaco.editor.setModelMarkers(editor.getModel(), "compiler", lastCompileMarkers[currentFile]);
+                    }
+                }
+                
+                logmsg("Error Reason:\n" + rawError, "error");
+                throw new Error("Compilation Failed");
+            }
+            binaryData = await res.arrayBuffer();
+        }
+
+        logmsg("2/3 Flash initialization...", "warn");
+        isProgramming = true;
         
         // Show download button
         downloadBtn.classList.remove('hidden');
         
-        // El binario debe alinear en Half-words
-        let safeBuffer = binArrayBuffer;
-        if (binArrayBuffer.byteLength % 2 !== 0) {
-            safeBuffer = new ArrayBuffer(binArrayBuffer.byteLength + 1);
-            new Uint8Array(safeBuffer).set(new Uint8Array(binArrayBuffer));
+        let safeBuffer = binaryData;
+        if (binaryData.byteLength % 2 !== 0) {
+            safeBuffer = new ArrayBuffer(binaryData.byteLength + 1);
+            new Uint8Array(safeBuffer).set(new Uint8Array(binaryData));
         }
 
         logmsg(`2/3 Compilation Successful! Received ${safeBuffer.byteLength} bytes.`, "success");
@@ -588,6 +614,7 @@ flashBtn.onclick = async () => {
         
         logmsg("Rebooting device...", "info");
         await processor.writeMem32(0xE000ED0C, 0x05FA0004);
+        isProgramming = false;
         
         logmsg("Device restarted successfully with your new code!", "success");
 
