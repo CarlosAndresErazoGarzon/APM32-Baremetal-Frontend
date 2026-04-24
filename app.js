@@ -111,13 +111,13 @@ exampleSelector.onchange = () => {
         loadExample(exampleSelector.value);
     }
 };
-
 async function loadExample(val) {
     const exampleDef = dynamicExamples.find(e => e.id === val);
     
     if (exampleDef) {
         try {
             logmsg(`Fetching '${exampleDef.name}'...`, "warn");
+            if (exampleDef.description) logmsg(`Project Info: ${exampleDef.description}`, "info");
             const fetchedFiles = {};
             
             const cacheBuster = `?t=${Date.now()}`;

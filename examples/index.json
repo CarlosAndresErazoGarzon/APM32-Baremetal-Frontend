@@ -2,16 +2,19 @@
     { 
         "id": "default", 
         "name": "Blink Simple", 
+        "description": "Standard LED heartbeat on PB2. Uses SysTick for deterministic millisecond delays.",
         "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"] 
     },
     { 
         "id": "uart_echo", 
         "name": "USB UART Echo", 
+        "description": "Interactive serial communication. Echoes back received characters and reports system uptime every 2 seconds.",
         "files": ["src/main.c", "src/apm32_config.c", "src/uart.c", "src/delay.c", "inc/apm32_config.h", "inc/uart.h", "inc/delay.h"] 
     },
     { 
         "id": "led_sequence", 
         "name": "LED Progress Sequence", 
+        "description": "Progressive sequence using pins PB12-PB15. Demonstrates sequential I/O control and multi-pin configuration.",
         "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"] 
     }
 ]
