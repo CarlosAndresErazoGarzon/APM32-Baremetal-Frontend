@@ -7,10 +7,39 @@ let virtualFS = {
     'src/apm32_config.c': `#include "apm32_config.h"\n\n/* USER CODE BEGIN Includes */\n/* USER CODE END Includes */\n\nvoid APM32_Init(void) {\n    // System Initialization (Main Clocks)\n    SystemInit();\n    \n    // Initialization of selected components\n    SysTick_Init(); // Inicializar timer de delay\n    RCM->APB2CLKEN |= (1 << 3); // Habilitar reloj GPIOB\n    \n    // Configurar LED en PB2 como salida Push-Pull (50MHz)\n    GPIOB->CFGLOW = (GPIOB->CFGLOW & ~(0xF << 8)) | (0x3 << 8);\n\n    /* USER CODE BEGIN APM32_Init */\n    /* USER CODE END APM32_Init */\n}\n\n/* USER CODE BEGIN Private Functions */\n/* USER CODE END Private Functions */`,
     'inc/apm32_config.h': `#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\n\nvoid APM32_Init(void);\n\n#endif`,
     'src/delay.c': `#include "delay.h"\n#include "apm32f10x.h"\n\nvolatile uint32_t msTicks = 0;\n\nvoid SysTick_Init(void) {\n    // Update SystemCoreClock variable in case HSE fails and HSI (8MHz) is used\n    SystemCoreClockUpdate();\n    \n    // Configure SysTick for 1ms intervals\n    if (SysTick_Config(SystemCoreClock / 1000)) {\n        while (1); // Error trap\n    }\n    \n    // Set SysTick to the highest priority (0) to prevent delay_ms() from deadlocking\n    NVIC_SetPriority(SysTick_IRQn, 0);\n}\n\nvoid delay_ms(uint32_t ms) {\n    uint32_t start = msTicks;\n    while ((msTicks - start) < ms);\n}\n\nvoid SysTick_Handler(void) {\n    msTicks++;\n}`,
-    'inc/delay.h': `#ifndef DELAY_H\n#define DELAY_H\n\n#include <stdint.h>\n\nextern volatile uint32_t msTicks;\n\n// Prototipos\nvoid SysTick_Init(void);\nvoid delay_ms(uint32_t ms);\n\n#endif`
+    'inc/delay.h': `#ifndef DELAY_H\n#define DELAY_H\n\n#include <stdint.h>\n\nextern volatile uint32_t msTicks;\n\n// Prototipos\nvoid SysTick_Init(void);\nvoid delay_ms(uint32_t ms);\n\n// Aliases for common naming conventions\n#define DelayMs     delay_ms\n#define Delay_ms    delay_ms\n#define delayMs     delay_ms\n#define DELAY_MS    delay_ms\n\n#endif`
 };
+
+// Configuración Global
+const CONFIG = {
+    API_URL: (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '') ? 'http://localhost:3000' : 'https://apm32-baremetal-backend.onrender.com'
+};
+
+// --- Firebase Initialization ---
+let auth = null;
+let db = null;
+
+function updateProjectBadge(type, name) {
+    const badge = document.getElementById('projectBadge');
+    if (!badge) return;
+    if (type === 'cloud') {
+        badge.innerText = 'Project: ' + name;
+        badge.className = 'mx-3 mt-3 px-2 py-1 bg-cyan-900/30 border border-cyan-500/30 rounded text-[9px] text-cyan-400 font-bold uppercase text-center tracking-wider truncate';
+    } else if (type === 'example') {
+        badge.innerText = 'Example: ' + name;
+        badge.className = 'mx-3 mt-3 px-2 py-1 bg-purple-900/30 border border-purple-500/30 rounded text-[9px] text-purple-400 font-bold uppercase text-center tracking-wider truncate';
+    } else {
+        badge.innerText = 'Project: Scratchpad';
+        badge.className = 'mx-3 mt-3 px-2 py-1 bg-white/5 border border-white/10 rounded text-[9px] text-white/50 font-bold uppercase text-center tracking-wider truncate';
+    }
+}
+
+let currentUser = null;
+
 let currentFile = 'src/main.c';
 let lastCompileMarkers = {};
+let isProgramming = false;
+let originalExampleContent = JSON.stringify(virtualFS); // Initialize with default code
 
 // Configuración de Temas
 const themeToggle = document.getElementById('themeToggle');
@@ -87,10 +116,7 @@ require(['vs/editor/editor.main'], function () {
     fetch(`${CONFIG.API_URL}/health`).catch(() => {});
 });
 
-// Configuración Global
-const CONFIG = {
-    API_URL: (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '') ? 'http://localhost:3000' : 'https://apm32-baremetal-backend.onrender.com'
-};
+
 
 const logDiv = document.getElementById('logBox');
 const connectBtn = document.getElementById('connectBtn');
@@ -102,15 +128,211 @@ const downloadZipBtn = document.getElementById('downloadZipBtn');
 const newFileBtn = document.getElementById('newFileBtn');
 const fileList = document.getElementById('fileList');
 
+// Firebase Auth & Cloud Save Logic
+const authBtn = document.getElementById('authBtn');
+const cloudSaveBtn = document.getElementById('cloudSaveBtn');
+const cloudLoadBtn = document.getElementById('cloudLoadBtn');
+
+async function initFirebase() {
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/api/config`);
+        if (!res.ok) throw new Error("Failed to fetch Firebase config");
+        const configData = await res.json();
+        
+        firebase.initializeApp(configData);
+        auth = firebase.auth();
+        db = firebase.firestore();
+
+        auth.onAuthStateChanged((user) => {
+            currentUser = user;
+            if (user) {
+                authBtn.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg> LOGOUT`;
+                authBtn.title = user.email;
+                cloudSaveBtn.disabled = false;
+                cloudSaveBtn.classList.remove('opacity-50', 'hidden');
+                cloudLoadBtn.disabled = false;
+                cloudLoadBtn.classList.remove('opacity-50', 'hidden');
+            } else {
+                authBtn.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg> LOGIN`;
+                authBtn.title = "Login with Google";
+                cloudSaveBtn.disabled = true;
+                cloudSaveBtn.classList.add('opacity-50', 'hidden');
+                cloudLoadBtn.disabled = true;
+                cloudLoadBtn.classList.add('opacity-50', 'hidden');
+                updateProjectBadge('scratchpad', '');
+            }
+        });
+    } catch (e) {
+        console.error("Firebase init failed:", e);
+    }
+}
+initFirebase();
+
+authBtn.onclick = () => {
+    if (currentUser) {
+        auth.signOut();
+        if (dynamicExamples.length > 0) {
+            loadExample(dynamicExamples[0].id);
+        }
+        logmsg("Logged out successfully.", "info");
+    } else {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider).then((result) => {
+            logmsg(`Welcome, ${result.user.email}!`, "success");
+        }).catch((error) => {
+            logmsg("Login failed: " + error.message, "error");
+        });
+    }
+};
+
+cloudSaveBtn.onclick = async () => {
+    if (!currentUser) return;
+    saveCurrentFile(); // Sync editor content to virtualFS before saving
+    try {
+        logmsg("Saving project to cloud...", "warn");
+        await db.collection("users").doc(currentUser.uid).set({
+            email: currentUser.email,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+            project: virtualFS
+        });
+        updateProjectBadge('cloud', 'Cloud');
+        exampleSelector.value = '';
+        logmsg("Project saved successfully!", "success");
+    } catch (e) {
+        logmsg("Cloud Save failed: " + e.message, "error");
+    }
+};
+
+cloudLoadBtn.onclick = async () => {
+    if (!currentUser) return;
+    try {
+        logmsg("Loading project from cloud...", "warn");
+        const doc = await db.collection("users").doc(currentUser.uid).get();
+        if (doc.exists && doc.data().project) {
+            virtualFS = doc.data().project;
+            delete virtualFS["null"];
+            delete virtualFS["undefined"];
+            activeExampleId = "cloud-project";
+            exampleSelector.value = "";
+            updateProjectBadge('cloud', 'Cloud');
+            renderFileList();
+            if (Object.keys(virtualFS).length > 0) {
+                const targetFile = virtualFS['src/main.c'] ? 'src/main.c' : Object.keys(virtualFS)[0];
+                currentFile = null; // Force reload
+                loadFile(targetFile);
+            }
+            logmsg("Project loaded successfully!", "success");
+        } else {
+            logmsg("No saved project found in the cloud.", "info");
+        }
+    } catch (e) {
+        logmsg("Cloud Load failed: " + e.message, "error");
+    }
+};
+
 let lastCompiledBinary = null;
 
 let dynamicExamples = [];
+let activeExampleId = "default";
+let sizeCache = JSON.parse(localStorage.getItem('apm32_size_cache') || '{}'); // Key: Content Hash, Value: {flash, ram}
+
+async function getContentHash(fs) {
+    const msgUint8 = new TextEncoder().encode(JSON.stringify(fs));
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 exampleSelector.onchange = () => {
     if (exampleSelector.value) {
         loadExample(exampleSelector.value);
     }
 };
+
+
+
+function updateResourceUsage(flashUsed, ramUsed) {
+    const flashMax = 128 * 1024;
+    const ramMax = 20 * 1024;
+
+    const flashPercent = (flashUsed / flashMax * 100).toFixed(1);
+    const ramPercent = (ramUsed / ramMax * 100).toFixed(1);
+
+    console.log(`[Memory Update] Flash: ${flashUsed}B (${flashPercent}%), RAM: ${ramUsed}B (${ramPercent}%)`);
+
+    const flashBar = document.getElementById('flashUsageBar');
+    const flashText = document.getElementById('flashUsageText');
+    const ramBar = document.getElementById('ramUsageBar');
+    const ramText = document.getElementById('ramUsageText');
+
+    if (flashBar) flashBar.style.width = flashPercent + '%';
+    if (flashText) flashText.innerText = flashPercent + '%';
+    if (ramBar) ramBar.style.width = ramPercent + '%';
+    if (ramText) ramText.innerText = ramPercent + '%';
+}
+
+
+
+// Resource and Dashboard Logic
+const rightSidebar = document.getElementById('rightSidebar');
+let registerPollingInterval = null;
+
+let isPollingActive = false;
+
+async function startRegisterPolling() {
+    if (isPollingActive || !processor) return;
+    
+    isPollingActive = true;
+    let pollStep = 0;
+    
+    const pollLoop = async () => {
+        if (!isPollingActive || !processor) {
+            updateCoreStateUI("Idle");
+            return;
+        }
+
+        // Pause polling while flashing, but keep the loop alive
+        if (isProgramming) {
+            updateCoreStateUI("Wait...");
+            setTimeout(pollLoop, 1000);
+            return;
+        }
+
+        try {
+            if (!processor.transport.device.opened) throw new Error("Offline");
+
+            const dhcsr = await processor.readMem32(0xE000EDF0);
+            updateCoreStateUI((dhcsr & 0x00020000) ? "Halted" : "Running");
+            
+            setTimeout(pollLoop, 200);
+        } catch (e) {
+            setTimeout(pollLoop, 1000);
+        }
+    };
+
+    pollLoop();
+}
+
+function stopRegisterPolling() {
+    isPollingActive = false;
+    updateCoreStateUI("Idle");
+}
+
+function updateCoreStateUI(state) {
+    const stateTag = document.getElementById('coreStateTag');
+    if (!stateTag) return;
+    
+    stateTag.innerText = state.toUpperCase();
+    stateTag.className = "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all duration-300";
+    
+    if (state === "Running") stateTag.classList.add('bg-emerald-500/20', 'text-emerald-400', 'border', 'border-emerald-500/30');
+    else if (state === "Halted") stateTag.classList.add('bg-amber-500/20', 'text-amber-400', 'border', 'border-amber-500/30');
+    else if (state === "Wait...") stateTag.classList.add('bg-blue-500/20', 'text-blue-400', 'border', 'border-blue-500/30');
+    else stateTag.classList.add('bg-slate-500/20', 'text-slate-400', 'border', 'border-slate-500/30');
+}
+
+
+
 async function loadExample(val) {
     const exampleDef = dynamicExamples.find(e => e.id === val);
     
@@ -118,11 +340,11 @@ async function loadExample(val) {
         try {
             logmsg(`Fetching '${exampleDef.name}'...`, "warn");
             if (exampleDef.description) logmsg(`Project Info: ${exampleDef.description}`, "info");
+            updateProjectBadge('example', exampleDef.name);
             const fetchedFiles = {};
             
             const cacheBuster = `?t=${Date.now()}`;
             for (const file of exampleDef.files) {
-                logmsg(`Loading ${file}...`, "warn");
                 const res = await fetch(`examples/${exampleDef.id}/${file}${cacheBuster}`);
                 if (!res.ok) throw new Error(`Failed to load ${file}`);
                 fetchedFiles[file] = await res.text();
@@ -130,6 +352,7 @@ async function loadExample(val) {
             
             virtualFS = fetchedFiles;
             originalExampleContent = JSON.stringify(fetchedFiles); // Save original for 'Flash Cache'
+            activeExampleId = exampleDef.id;
             
             currentFile = Object.keys(fetchedFiles).find(f => f === 'main.c' || f.endsWith('/main.c')) || Object.keys(fetchedFiles)[0];
             
@@ -143,6 +366,7 @@ async function loadExample(val) {
                 monaco.editor.setModelMarkers(editor.getModel(), "compiler", []);
                 renderFileList();
             }
+            renderFileList();
             logmsg(`Workspace loaded: ${exampleDef.name}`, 'success');
         } catch (err) {
             logmsg(`Error loading workspace: ${err.message}`, "error");
@@ -176,7 +400,7 @@ async function loadExampleRegistry() {
 loadExampleRegistry();
 
 function saveCurrentFile() {
-    if (editor) virtualFS[currentFile] = editor.getValue();
+    if (editor && currentFile) virtualFS[currentFile] = editor.getValue();
 }
 
 function loadFile(filename) {
@@ -291,6 +515,7 @@ function renderFileList() {
                     return;
                 }
                 
+                if (currentFile === filename) saveCurrentFile();
                 virtualFS[newFilename] = virtualFS[filename];
                 delete virtualFS[filename];
                 if (currentFile === filename) currentFile = newFilename;
@@ -308,8 +533,10 @@ function renderFileList() {
                     if(confirm(`Delete ${displayName}?`)) {
                         delete virtualFS[filename];
                         if (currentFile === filename) {
+                            currentFile = null;
                             const nextFile = Object.keys(virtualFS)[0];
-                            loadFile(nextFile);
+                            if (nextFile) loadFile(nextFile);
+                            else { editor.setValue(""); renderFileList(); }
                         } else {
                             renderFileList();
                         }
@@ -341,9 +568,25 @@ newFileBtn.onclick = () => {
     if (!filename) return;
     filename = filename.trim();
     
+    // Validate filename
+    if (!filename) {
+        alert("Filename cannot be empty.");
+        return;
+    }
+
+    // Validate extension
+    const ext = filename.split('.').pop().toLowerCase();
+    if (!['c', 'h', 'cpp', 's'].includes(ext)) {
+        alert("Invalid file extension. Use .c, .h, .cpp, or .s");
+        return;
+    }
+
+    // Sanitize: remove invalid characters
+    const baseName = filename.replace(/[^a-zA-Z0-9_\-\.\/]/g, '_');
+    filename = baseName;
+
     // Auto-organize into folders if not specified
     if (!filename.includes('/')) {
-        const ext = filename.split('.').pop();
         filename = (ext === 'h') ? 'inc/' + filename : 'src/' + filename;
     }
 
@@ -353,6 +596,7 @@ newFileBtn.onclick = () => {
     }
     virtualFS[filename] = '// ' + filename + '\n';
     loadFile(filename);
+    logmsg(`Created file: ${filename}`, 'success');
 };
 
 if (downloadBtn) {
@@ -402,6 +646,9 @@ let processor = null;
 const handleLink = async (requestPermissions = true) => {
     if (processor) {
         logmsg("Hardware already linked.", "info");
+        flashBtn.disabled = false;
+        disconnectBtn.classList.remove('hidden');
+        flashBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         return;
     }
 
@@ -410,10 +657,8 @@ const handleLink = async (requestPermissions = true) => {
         const devices = await navigator.usb.getDevices();
         
         if (devices.length > 0) {
-            device = devices[0]; // Auto-select the first known device
-            logmsg(`Auto-detected: ${device.productName || 'DAP-Link'}`, 'info');
+            device = devices[0]; 
         } else if (requestPermissions) {
-            logmsg("Requesting USB permissions...", 'warn');
             device = await navigator.usb.requestDevice({
                 filters: [
                     { classCode: 255 },
@@ -424,22 +669,66 @@ const handleLink = async (requestPermissions = true) => {
 
         if (!device) return;
 
+        // === PHASE 1: Test DAP-Link transport layer ===
         const transport = new DAPjs.WebUSB(device);
-        processor = new DAPjs.CortexM(transport, 0, 1000000); 
         
-        await processor.connect();
-        logmsg(`Connected to USB Support`, 'success');
-        
-        flashBtn.disabled = false;
-        disconnectBtn.classList.remove('hidden');
-        flashBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        try {
+            await transport.open();
+        } catch (transportErr) {
+            logmsg("[DIAG] TRANSPORT FAILED — DAP-Link is not responding!", 'error');
+            logmsg("[DIAG] This means the DAP-Link adapter is faulty or its firmware is corrupted.", 'error');
+            logmsg("[DIAG] Solution: Try re-flashing the DAP-Link firmware, or use a different adapter.", 'info');
+            throw transportErr;
+        }
 
-        // Sequence Serial initialization
-        setTimeout(async () => {
-            await handleSerialConnect(requestPermissions);
-        }, 300);
+        // === PHASE 2: Connect to Cortex-M target (APM32) ===
+        try {
+            const tempProcessor = new DAPjs.CortexM(transport, 0, 100000);
+            await tempProcessor.connect();
+            processor = tempProcessor;
+            
+            logmsg(`Connected to USB Support (SWD: 100kHz)`, 'success');
+            
+            flashBtn.disabled = false;
+            disconnectBtn.classList.remove('hidden');
+            flashBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+            // Start telemetry IMMEDIATELY
+            startRegisterPolling();
+
+            // Sequence Serial initialization in background
+            setTimeout(async () => {
+                try {
+                    await handleSerialConnect(requestPermissions);
+                } catch(e) { console.warn("Serial auto-connect skipped"); }
+            }, 1500);
+
+            return;
+        } catch (targetErr) {
+            // Transport worked but target failed — APM32 might be the issue
+            try { await transport.close(); } catch(e) {}
+            
+            if (requestPermissions) {
+                logmsg("[DIAG] DAP-Link OK but TARGET connection failed!", 'error');
+                logmsg("[DIAG] Error: " + targetErr.message, 'error');
+                
+                if (targetErr.message.includes('Transfer count mismatch')) {
+                    logmsg("─── Possible causes ───", 'warn');
+                    logmsg("1. SWD pins (SWDIO/SWCLK) not connected or loose", 'warn');
+                    logmsg("2. APM32 is in deep sleep / lockup / Read Protection", 'warn');
+                    logmsg("3. Target VCC not powered (check 3.3V)", 'warn');
+                    logmsg("4. Wrong wiring (SWDIO ↔ SWCLK swapped)", 'warn');
+                    logmsg("─── Try this ───", 'info');
+                    logmsg("• Power-cycle the entire board (unplug, wait 5s, replug)", 'info');
+                    logmsg("• Hold RESET while clicking LINK, release after 1s", 'info');
+                    logmsg("• Check that SWDIO, SWCLK, GND, and VCC are wired correctly", 'info');
+                }
+            }
+            throw targetErr;
+        }
 
     } catch(err) {
+        processor = null;
         if (requestPermissions) {
             logmsg("Connection error: " + err.message, 'error');
         }
@@ -454,8 +743,8 @@ connectBtn.onclick = (e) => {
 disconnectBtn.onclick = async () => {
     if (processor) {
         try {
-            if (!isProgramming || !processor) {
-                throw new Error("Programming aborted or connection lost.");
+            if (isProgramming) {
+                throw new Error("Cannot disconnect while firmware is flashing.");
             }
             await processor.disconnect();
             logmsg("USB device disconnected.", "info");
@@ -528,20 +817,38 @@ flashBtn.onclick = async () => {
         saveCurrentFile();
         
         let binaryData = null;
-        const currentContent = JSON.stringify(virtualFS);
-        const isModified = currentContent !== originalExampleContent;
+        let isModified = false;
+        const originalFS = JSON.parse(originalExampleContent || '{}');
+        
+        for (const path in virtualFS) {
+            const current = (virtualFS[path] || "").replace(/\r\n/g, '\n').trim();
+            const original = (originalFS[path] || "").replace(/\r\n/g, '\n').trim();
+            if (current !== original) {
+                logmsg(`Cache Miss: Changes in ${path}`, "info");
+                isModified = true;
+                break;
+            }
+        }
 
-        if (!isModified && typeof exampleSelector !== 'undefined' && exampleSelector.value) {
-            logmsg("Unmodified example detected. Using cached binary...", "warn");
+        const currentHash = await getContentHash(virtualFS);
+
+        if (!isModified && sizeCache[currentHash]) {
+            const cacheExampleId = activeExampleId;
+            logmsg(`Unmodified code detected. Loading cache for [${cacheExampleId}]...`, "warn");
             try {
-                const binRes = await fetch(`examples/${exampleSelector.value}/firmware.bin`);
+                const binRes = await fetch(`examples/${cacheExampleId}/firmware.bin`);
                 if (binRes.ok) {
                     binaryData = await binRes.arrayBuffer();
+                    if (sizeCache[currentHash]) {
+                        updateResourceUsage(sizeCache[currentHash].flash, sizeCache[currentHash].ram);
+                    } else {
+                        updateResourceUsage(binaryData.byteLength, 0); 
+                    }
                 } else {
-                    logmsg("Cache missing, falling back to compiler...", "warn");
+                    logmsg("⚠️ Cache bin not found on server, compiling...", "warn");
                 }
             } catch (e) {
-                logmsg("Cache fetch failed, falling back to compiler...", "warn");
+                logmsg("⚠️ Cache fetch failed, compiling...", "warn");
             }
         }
 
@@ -557,7 +864,6 @@ flashBtn.onclick = async () => {
                 const errLog = await res.json();
                 const rawError = errLog.details || '';
                 
-                // Parse GCC Errors
                 const lines = rawError.split('\n');
                 const regex = /(?:src|inc)\/([a-zA-Z0-9_\-\.]+):(\d+):.*?(error|warning):\s+(.*)/i;
                 
@@ -581,7 +887,7 @@ flashBtn.onclick = async () => {
                 const errorFiles = Object.keys(lastCompileMarkers);
                 if (errorFiles.length > 0) {
                     if (!errorFiles.includes(currentFile)) {
-                        loadFile(errorFiles[0]); // auto-switch to first errored file
+                        loadFile(errorFiles[0]);
                     } else {
                         monaco.editor.setModelMarkers(editor.getModel(), "compiler", lastCompileMarkers[currentFile]);
                     }
@@ -590,14 +896,23 @@ flashBtn.onclick = async () => {
                 logmsg("Error Reason:\n" + rawError, "error");
                 throw new Error("Compilation Failed");
             }
+
+            const tSize = parseInt(res.headers.get('X-Size-Text') || 0);
+            const dSize = parseInt(res.headers.get('X-Size-Data') || 0);
+            const bSize = parseInt(res.headers.get('X-Size-Bss') || 0);
+            
+            updateResourceUsage(tSize + dSize, dSize + bSize);
+            
+            const compileHash = await getContentHash(virtualFS);
+            sizeCache[compileHash] = { flash: tSize + dSize, ram: dSize + bSize };
+            localStorage.setItem('apm32_size_cache', JSON.stringify(sizeCache));
+
             binaryData = await res.arrayBuffer();
         }
 
-        logmsg("2/3 Flash initialization...", "warn");
         isProgramming = true;
-        
-        // Show download button
-        downloadBtn.classList.remove('hidden');
+        logmsg("2/3 Flash initialization...", "warn");
+        logmsg("Program Size: " + binaryData.byteLength + " bytes.", "info");
         
         let safeBuffer = binaryData;
         if (binaryData.byteLength % 2 !== 0) {
@@ -612,14 +927,17 @@ flashBtn.onclick = async () => {
         await processor.halt(); 
         await flashAPM32(processor, safeBuffer);
         
+        await processor.reset();
         logmsg("Rebooting device...", "info");
         await processor.writeMem32(0xE000ED0C, 0x05FA0004);
-        isProgramming = false;
         
         logmsg("Device restarted successfully with your new code!", "success");
 
     } catch(err) {
         logmsg("Process failed: " + err.message, "error");
+    } finally {
+        isProgramming = false;
+        startRegisterPolling();
     }
 };
 
@@ -629,11 +947,25 @@ const showDocsBtn = document.getElementById('showDocsBtn');
 const closeDocsBtn = document.getElementById('closeDocsBtn');
 const docContent = document.getElementById('docContent');
 
+// Recovery Modal Logic
+const recoveryModal = document.getElementById('recoveryModal');
+const recoveryModeBtn = document.getElementById('recoveryModeBtn');
+const closeRecoveryBtn = document.getElementById('closeRecoveryBtn');
+
+if(recoveryModeBtn) recoveryModeBtn.onclick = () => recoveryModal.classList.remove('hidden');
+if(closeRecoveryBtn) closeRecoveryBtn.onclick = () => recoveryModal.classList.add('hidden');
+
 showDocsBtn.onclick = () => {
     docsModal.classList.remove('hidden');
     loadDoc('PINOUT_APM32.md');
 };
-closeDocsBtn.onclick = () => docsModal.classList.add('hidden');
+
+const closeDocs = () => docsModal.classList.add('hidden');
+closeDocsBtn.onclick = closeDocs;
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDocs();
+});
 
 async function loadDoc(file, el) {
     // Handle tab styling
@@ -670,8 +1002,8 @@ const fonts = [
 async function initTitle() {
     const titleEl = document.getElementById('projectTitle');
     if (!titleEl) return;
-    
     try {
+        const fonts = ['future.txt', 'larry_3d.txt', 'speed.txt', 'shadow.txt', 'dos.txt', 'rowan.txt'];
         const randomFont = fonts[Math.floor(Math.random() * fonts.length)];
         const res = await fetch(`fonts/${randomFont}`);
         if (!res.ok) throw new Error();
@@ -686,6 +1018,11 @@ async function initTitle() {
 // Global Initialization
 window.addEventListener('DOMContentLoaded', () => {
     initTitle();
+    
+    // Start polling if sidebar is already open
+    if (rightSidebar && !rightSidebar.classList.contains('w-0')) {
+        startRegisterPolling();
+    }
 });
 
 // Web Serial Logic
@@ -700,18 +1037,20 @@ const serialStatusLed = document.getElementById('serialStatusLed');
 const serialInputField = document.getElementById('serialInput');
 const serialSendBtn = document.getElementById('serialSendBtn');
 
-const toggleTerminal = () => {
-    const isClosed = terminalPane.classList.contains('h-8');
-    if (isClosed) {
+let isTerminalOpen = true;
+
+function toggleTerminal() {
+    isTerminalOpen = !isTerminalOpen;
+    if (isTerminalOpen) {
         terminalPane.classList.remove('h-8');
-        terminalPane.classList.add('h-48');
-        toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+        terminalPane.classList.add('h-64');
+        if (toggleTerminalBtn) toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(0deg)';
     } else {
-        terminalPane.classList.remove('h-48');
+        terminalPane.classList.remove('h-64');
         terminalPane.classList.add('h-8');
-        toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(180deg)';
+        if (toggleTerminalBtn) toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(180deg)';
     }
-};
+}
 
 const terminalHeader = document.getElementById('terminalHeader');
 if (terminalHeader) terminalHeader.onclick = toggleTerminal;
@@ -833,9 +1172,6 @@ disconnectBtn.onclick = async (e) => {
     if (el) el.addEventListener('click', (e) => e.stopPropagation());
 });
 
-// Auto-Link Trigger on Load
+// Initialize UI on Load (no auto-link to avoid confusing messages when no board is connected)
 window.addEventListener('load', () => {
-    setTimeout(() => {
-        handleLink(false); // Try silent link (no prompts)
-    }, 1000);
 });
