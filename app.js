@@ -1091,15 +1091,8 @@ const handleSerialConnect = async () => {
     }
 
     try {
-        // Auto-detect if already authorized to avoid double-prompt if possible
-        const ports = await navigator.serial.getPorts();
-        if (ports.length > 0) {
-            serialPort = ports[0];
-            logmsg("Port auto-detected via saved permissions.", "success");
-        } else {
-            logmsg("Requesting Serial permissions (Browser Security)...", 'warn');
-            serialPort = await navigator.serial.requestPort();
-        }
+        logmsg("Requesting Serial permissions (Browser Security)...", 'warn');
+        serialPort = await navigator.serial.requestPort();
 
         const baudRate = parseInt(baudRateSelect.value);
         await serialPort.open({ baudRate });
