@@ -32,7 +32,7 @@
             --active-border: #00f2ff;
 
             /* Button variables */
-            --btn-blue-bg: #1e1b4b; 
+            --btn-blue-bg: #1e1b4b;
             --btn-blue-text: #818cf8;
             --btn-green-bg: #064e3b;
             --btn-green-text: #10b981;
@@ -40,6 +40,10 @@
             --btn-red-text: #f87171;
             --btn-amber-bg: #451a03;
             --btn-amber-text: #f59e0b;
+
+            /* Subtle overlay tracks/pills (progress bar tracks, default badges) */
+            --track-bg: rgba(255, 255, 255, 0.05);
+            --track-border: rgba(255, 255, 255, 0.1);
         }
         
         body.light-theme {
@@ -66,6 +70,9 @@
             --btn-red-text: #ffffff;
             --btn-amber-bg: #92400e; /* Marrón ámbar oscuro */
             --btn-amber-text: #ffffff;
+
+            --track-bg: rgba(15, 23, 42, 0.05);
+            --track-border: rgba(15, 23, 42, 0.12);
         }
 
         body {
@@ -83,6 +90,10 @@
         body.light-theme .scanlines { display: none; }
         
         .retro-header { font-family: 'Silkscreen', cursive; color: var(--header-color); }
+        /* The figlet ASCII art renders at 6-7px -- individual glyph strokes are thin
+           enough that anti-aliasing alone washes them out, especially dark-on-light.
+           A tight same-hue shadow fills the gaps without changing the actual color. */
+        #projectTitle { text-shadow: 0 0 1px var(--header-color); }
         .terminal-text { font-family: 'VT323', monospace; }
         
         #editor { 
@@ -159,6 +170,21 @@
         #docsModal pre { background: var(--log-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; margin-block: 1rem; border-left: 4px solid var(--active-border); }
         .doc-tab.active { background: var(--active-bg); border-bottom: 2px solid var(--active-border); color: var(--header-text); }
         .doc-tab:not(.active) { opacity: 0.6; }
+
+        .terminal-tab-btn { color: var(--sidebar-text); border-bottom: 2px solid transparent; opacity: 0.6; transition: all 0.15s ease; }
+        .terminal-tab-btn:hover { opacity: 1; }
+        .terminal-tab-btn.active { color: var(--active-text); border-bottom-color: var(--active-border); opacity: 1; }
+
+        /* These keep their dark-mode accent hue (cyan/indigo/emerald), just swapped
+           for a darker, WCAG-friendlier shade of the same hue in light mode -- the
+           raw Tailwind -400 shades read fine on near-black but wash out on white. */
+        body.light-theme #serialSendBtn { color: #0e7490; }
+        body.light-theme #serialSendBtn:hover { color: #0891b2; }
+        body.light-theme #serialConnectBtn { color: #4338ca; }
+        body.light-theme #serialConnectBtn:hover { color: #4f46e5; }
+        body.light-theme #logBoxWelcome { color: #0e7490; }
+        body.light-theme #flashUsageText { color: #0e7490; }
+        body.light-theme #ramUsageText { color: #047857; }
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden">
@@ -172,7 +198,7 @@
                 <button id="mobileMenuBtn" class="p-2 text-[var(--header-color)] hover:bg-white/10 rounded transition-colors" title="Toggle File Tree">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                 </button>
-                <div id="projectTitle" class="retro-header text-[6px] leading-[1] lg:text-[7px] whitespace-pre font-mono opacity-80 overflow-hidden select-none">
+                <div id="projectTitle" class="retro-header text-[6px] leading-[1] lg:text-[7px] whitespace-pre font-mono overflow-hidden select-none">
                     <!-- Dynamic ASCII Art -->
                 </div>
             </div>
@@ -213,7 +239,7 @@
                     <button id="newFileBtn" class="w-6 h-6 bg-cyan-600/20 hover:bg-cyan-500/40 text-[var(--header-color)] border border-[var(--border-color)] rounded flex items-center justify-center font-bold font-sans transition-all">+</button>
                 </div>
             </div>
-            <div id="projectBadge" class="mx-3 mt-3 px-2 py-1 bg-white/5 border border-white/10 rounded text-[9px] text-white/50 font-bold uppercase text-center tracking-wider truncate" title="Current Workspace Project">
+            <div id="projectBadge" class="mx-3 mt-3 px-2 py-1 bg-[var(--track-bg)] border border-[var(--track-border)] rounded text-[9px] text-[var(--sidebar-text)] font-bold uppercase text-center tracking-wider truncate" title="Current Workspace Project">
                 Project: Scratchpad
             </div>
             <div id="fileList" class="flex-grow overflow-y-auto p-3 space-y-2 min-w-[240px]">
@@ -237,6 +263,11 @@
                         LOAD CLOUD
                     </button>
                 </div>
+                <label id="autoSaveWrapper" class="hidden items-center gap-2 px-1 -mt-1 cursor-pointer select-none">
+                    <input id="autoSaveToggle" type="checkbox" class="peer sr-only">
+                    <span class="w-3 h-3 rounded-sm border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
+                    <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-70 peer-checked:opacity-100 transition-opacity">Autosave to cloud</span>
+                </label>
                 
                 <!-- Sidebar Utility Footer -->
                 <div class="flex items-center justify-between mt-1 pt-3 border-t border-[var(--border-color)]/30">
@@ -254,7 +285,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                         </button>
                     </div>
-                    <div class="text-[8px] font-mono text-white/20 px-2 select-none">v1.2.0</div>
+                    <div class="text-[8px] font-mono px-2 select-none" style="color: var(--sidebar-text); opacity: 0.4;">v1.3.0</div>
                 </div>
             </div>
         </div>
@@ -268,51 +299,64 @@
             <div class="flex-grow rounded-lg overflow-hidden border border-[var(--border-color)] shadow-2xl bg-[#0f0f1a] min-h-0">
                 <div id="editor"></div>
             </div>
-
-            <!-- Console -->
-            <div class="log-box rounded-lg shadow-inner flex-grow flex flex-col min-h-0" id="logBox">
-                <div class="text-cyan-400 terminal-text text-base lg:text-lg italic p-2">>> SYSTEM_READY...</div>
-            </div>
-
         </div> <!-- End of Main Area -->
     </div> <!-- End of Workspace -->
 
     <!-- Serial Terminal & Telemetry Pane (Bottom) -->
-    <div id="terminalPane" class="bg-[#0a0a0f] border-t-2 border-[var(--border-color)] z-[70] transition-all duration-300 h-64 flex flex-row overflow-hidden shrink-0 w-full">
-        
-        <!-- Left: Serial Monitor -->
+    <div id="terminalPane" class="bg-[var(--sidebar-bg)] border-t-2 border-[var(--border-color)] z-[70] transition-all duration-300 h-64 flex flex-row overflow-hidden shrink-0 w-full">
+
+        <!-- Left: Logs / Serial Monitor (tabbed) -->
         <div class="flex-grow flex flex-col min-w-0 border-r-2 border-[var(--border-color)]">
-            <div class="flex items-center justify-between px-4 h-8 min-h-[2rem] bg-[var(--sidebar-bg)] border-b border-[var(--border-color)] cursor-pointer" id="terminalHeader">
-                <div class="flex items-center gap-4">
-                    <span class="text-[10px] font-bold uppercase tracking-widest text-cyan-400 flex items-center gap-2">
-                        <span id="serialStatusLed" class="w-2.5 h-2.5 rounded-full bg-slate-600 shadow-[0_0_5px_rgba(71,85,105,0.5)] transition-all duration-300"></span>
+            <div class="flex items-center justify-between px-2 h-8 min-h-[2rem] bg-[var(--sidebar-bg)] border-b border-[var(--border-color)]" id="terminalHeader">
+                <div class="flex items-center h-full gap-1">
+                    <button id="logsTabBtn" class="terminal-tab-btn active h-full px-3 text-[10px] font-bold uppercase tracking-widest">
+                        Logs
+                    </button>
+                    <button id="serialTabBtn" class="terminal-tab-btn h-full px-3 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                        <span id="serialStatusLed" class="w-2 h-2 rounded-full bg-slate-600 shadow-[0_0_5px_rgba(71,85,105,0.5)] transition-all duration-300"></span>
                         Serial Monitor
-                    </span>
+                    </button>
+                </div>
+
+                <!-- Logs tab controls -->
+                <div id="logsControls" class="flex items-center gap-4">
+                    <button id="clearLogBtn" class="text-[9px] font-bold uppercase text-[var(--sidebar-text)] opacity-50 hover:opacity-90">Clear</button>
+                </div>
+
+                <!-- Serial Monitor tab controls -->
+                <div id="serialControls" class="hidden items-center gap-4">
                     <select id="baudRate" class="bg-black/40 text-[9px] border border-white/10 rounded px-2 py-0.5 text-white/60 focus:outline-none">
                         <option value="9600">9600 baud</option>
                         <option value="115200" selected>115200 baud</option>
                     </select>
                     <!-- Send Data Input -->
-                    <div class="flex items-center gap-2 ml-4">
-                        <input id="serialInput" type="text" placeholder="Type command..." class="bg-black/40 text-[10px] border border-white/10 rounded px-3 py-1 text-emerald-400 focus:outline-none focus:border-emerald-500/50 w-48 transition-all">
+                    <div class="flex items-center gap-2">
+                        <input id="serialInput" type="text" placeholder="Type command..." class="bg-black/40 text-[10px] border border-white/10 rounded px-3 py-1 text-emerald-400 focus:outline-none focus:border-emerald-500/50 w-40 transition-all">
                         <button id="serialSendBtn" class="text-[9px] font-bold uppercase text-cyan-400 hover:text-cyan-300">Send</button>
                     </div>
-                    <div class="flex gap-4 ml-6">
+                    <div class="flex gap-4">
                         <button id="serialConnectBtn" class="text-[9px] font-bold uppercase text-indigo-400 hover:text-indigo-300 underline underline-offset-4 decoration-indigo-500/30">Connect</button>
-                        <button id="serialClearBtn" class="text-[9px] font-bold uppercase text-white/30 hover:text-white/50">Clear</button>
+                        <button id="serialClearBtn" class="text-[9px] font-bold uppercase text-[var(--sidebar-text)] opacity-50 hover:opacity-90">Clear</button>
                     </div>
                 </div>
             </div>
-            <div id="serialOutput" class="p-3 flex-grow overflow-y-auto font-mono text-[11px] text-emerald-400/90 whitespace-pre-wrap leading-relaxed bg-black/20 custom-scrollbar"></div>
+
+            <!-- Logs panel -->
+            <div class="log-box flex-grow flex flex-col min-h-0" id="logBox" style="height: auto;">
+                <div id="logBoxWelcome" class="text-cyan-400 terminal-text text-base lg:text-lg italic p-2">>> SYSTEM_READY...</div>
+            </div>
+
+            <!-- Serial Monitor panel -->
+            <div id="serialOutput" class="hidden p-3 flex-grow overflow-y-auto font-mono text-[11px] text-emerald-400/90 whitespace-pre-wrap leading-relaxed bg-black/20 custom-scrollbar"></div>
         </div>
 
         <!-- Right: Telemetry Dashboard -->
         <div class="w-80 flex flex-col bg-[var(--sidebar-bg)] shrink-0">
             <div class="flex items-center justify-between px-4 h-8 min-h-[2rem] bg-[var(--sidebar-bg)] border-b border-[var(--border-color)]">
-                <span class="text-[10px] font-bold uppercase tracking-widest text-indigo-400 flex items-center gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--header-text)] flex items-center gap-2">
                     Telemetry Dashboard
                 </span>
-                <button id="toggleTerminalBtn" class="text-white/40 hover:text-white/100 p-1">
+                <button id="toggleTerminalBtn" class="text-[var(--sidebar-text)] opacity-60 hover:opacity-100 p-1">
                     <svg class="w-4 h-4 transform rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                 </button>
             </div>
@@ -320,26 +364,26 @@
             <div class="p-4 flex-grow overflow-y-auto space-y-4 custom-scrollbar">
                 <!-- Resources Module -->
                 <div class="space-y-3">
-                    <div class="text-[10px] font-bold text-indigo-300 uppercase flex justify-between tracking-wider">
+                    <div class="text-[10px] font-bold text-[var(--header-text)] uppercase flex justify-between tracking-wider">
                         <span>Memory Status</span>
                         <span id="coreStateTag" class="text-[8px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-bold uppercase transition-all duration-500">Idle</span>
                     </div>
                     <div class="space-y-4 pt-1">
                         <div class="space-y-1.5">
                             <div class="flex justify-between text-[9px] font-mono">
-                                <span class="text-white/40 uppercase">Flash Storage</span>
+                                <span class="text-[var(--sidebar-text)] opacity-70 uppercase">Flash Storage</span>
                                 <span id="flashUsageText" class="text-cyan-400">0%</span>
                             </div>
-                            <div class="bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
+                            <div class="bg-[var(--track-bg)] h-1.5 rounded-full overflow-hidden border border-[var(--track-border)]">
                                 <div id="flashUsageBar" class="bg-cyan-500 h-full transition-all duration-500" style="width: 0%"></div>
                             </div>
                         </div>
                         <div class="space-y-1.5">
                             <div class="flex justify-between text-[9px] font-mono">
-                                <span class="text-white/40 uppercase">RAM Runtime</span>
+                                <span class="text-[var(--sidebar-text)] opacity-70 uppercase">RAM Runtime</span>
                                 <span id="ramUsageText" class="text-emerald-400">0%</span>
                             </div>
-                            <div class="bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
+                            <div class="bg-[var(--track-bg)] h-1.5 rounded-full overflow-hidden border border-[var(--track-border)]">
                                 <div id="ramUsageBar" class="bg-emerald-500 h-full transition-all duration-500" style="width: 0%"></div>
                             </div>
                         </div>
@@ -351,7 +395,7 @@
             </div>
             
             <div class="p-2 border-t border-[var(--border-color)] bg-black/10">
-                <div class="text-[7px] text-white/20 italic leading-tight text-center">
+                <div class="text-[7px] text-[var(--sidebar-text)] opacity-40 italic leading-tight text-center">
                     <a href="https://github.com/carlosandreserazogarzon" target="_blank" class="hover:text-cyan-400 transition-colors">@carlosandreserazogarzon</a>
                 </div>
             </div>
@@ -364,9 +408,9 @@
         <div class="bg-[var(--sidebar-bg)] w-full max-w-5xl h-full rounded-lg border-2 border-[var(--border-color)] flex flex-col overflow-hidden shadow-2xl">
             <div class="flex items-center justify-between bg-[#1a1a2e] border-b border-[var(--border-color)]">
                 <div class="flex" id="docTabs">
-                    <button onclick="loadDoc('PINOUT_APM32.md', this)" class="doc-tab active px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Pinout</button>
-                    <button onclick="loadDoc('TUTORIAL_1.md', this)" class="doc-tab px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Tutorial 1</button>
-                    <button onclick="loadDoc('TUTORIAL_2.md', this)" class="doc-tab px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Tutorial 2</button>
+                    <button data-doc="PINOUT_APM32.md" class="doc-tab active px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Pinout</button>
+                    <button data-doc="TUTORIAL_1.md" class="doc-tab px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Tutorial 1</button>
+                    <button data-doc="TUTORIAL_2.md" class="doc-tab px-6 py-3 text-[10px] font-bold uppercase tracking-widest text-[var(--header-color)] border-r border-[var(--border-color)] transition-all hover:bg-white/5">Tutorial 2</button>
                 </div>
                 <button id="closeDocsBtn" class="mx-4 text-[10px] font-bold text-red-400 hover:text-red-300 uppercase tracking-widest px-3 py-1 border border-red-500/30 rounded bg-red-500/5">Close [Esc]</button>
             </div>
@@ -408,6 +452,6 @@
 
     <!-- Scripts -->
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>

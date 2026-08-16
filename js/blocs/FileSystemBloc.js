@@ -1,0 +1,216 @@
+import { Bloc } from '../core/Bloc.js';
+import { globalEventBus } from '../core/EventBus.js';
+
+export class FileSystemBloc extends Bloc {
+    get initialState() {
+        return {
+            virtualFS: {
+                'src/main.c': `#include "apm32f10x.h"\n#include "apm32_config.h"\n\n/* USER CODE BEGIN Includes */\n/* USER CODE END Includes */\n\nint main(void) {\n    // Configures clocks and selected components\n    APM32_Init();\n    \n    /* USER CODE BEGIN Init */\n    /* USER CODE END Init */\n\n    while(1) {\n        /* USER CODE BEGIN While */\n        GPIOB->ODATA ^= (1 << 2); // Toggle LED PB2\n        delay_ms(500);\n\n        /* USER CODE END While */\n    }\n    \n    return 0;\n}`,
+                'src/apm32_config.c': `#include "apm32_config.h"\n\n/* USER CODE BEGIN Includes */\n/* USER CODE END Includes */\n\nvoid APM32_Init(void) {\n    // System Initialization (Main Clocks)\n    SystemInit();\n    \n    // Initialization of selected components\n    SysTick_Init(); // Inicializar timer de delay\n    RCM->APB2CLKEN |= (1 << 3); // Habilitar reloj GPIOB\n    \n    // Configurar LED en PB2 como salida Push-Pull (50MHz)\n    GPIOB->CFGLOW = (GPIOB->CFGLOW & ~(0xF << 8)) | (0x3 << 8);\n\n    /* USER CODE BEGIN APM32_Init */\n    /* USER CODE END APM32_Init */\n}\n\n/* USER CODE BEGIN Private Functions */\n/* USER CODE END Private Functions */`,
+                'inc/apm32_config.h': `#ifndef APM_CFG\n#define APM_CFG\n#include "apm32f10x.h"\n\nvoid APM32_Init(void);\n\n#endif`,
+                'src/delay.c': `#include "delay.h"\n#include "apm32f10x.h"\n\nvolatile uint32_t msTicks = 0;\n\nvoid SysTick_Init(void) {\n    // Update SystemCoreClock variable in case HSE fails and HSI (8MHz) is used\n    SystemCoreClockUpdate();\n    \n    // Configure SysTick for 1ms intervals\n    if (SysTick_Config(SystemCoreClock / 1000)) {\n        while (1); // Error trap\n    }\n    \n    // Set SysTick to the highest priority (0) to prevent delay_ms() from deadlocking\n    NVIC_SetPriority(SysTick_IRQn, 0);\n}\n\nvoid delay_ms(uint32_t ms) {\n    uint32_t start = msTicks;\n    while ((msTicks - start) < ms);\n}\n\nvoid SysTick_Handler(void) {\n    msTicks++;\n}`,
+                'inc/delay.h': `#ifndef DELAY_H\n#define DELAY_H\n\n#include <stdint.h>\n\nextern volatile uint32_t msTicks;\n\n// Prototipos\nvoid SysTick_Init(void);\nvoid delay_ms(uint32_t ms);\n\n// Aliases for common naming conventions\n#define DelayMs     delay_ms\n#define Delay_ms    delay_ms\n#define delayMs     delay_ms\n#define DELAY_MS    delay_ms\n\n#endif`
+            },
+            currentFile: 'src/main.c',
+            projectType: 'scratchpad',
+            projectName: '',
+            projectId: null
+        };
+    }
+
+    createFile(filename) {
+        if (this.state.virtualFS[filename]) {
+            globalEventBus.emit('LOG', { message: 'File already exists!', type: 'error' });
+            return false;
+        }
+        
+        const newFS = { ...this.state.virtualFS };
+        newFS[filename] = `// New file: ${filename}\n`;
+        
+        this.emit({ virtualFS: newFS, currentFile: filename });
+        globalEventBus.emit('LOG', { message: `Created ${filename}`, type: 'success' });
+        return true;
+    }
+
+    deleteFile(filename) {
+        if (!this.state.virtualFS[filename]) return;
+        
+        const newFS = { ...this.state.virtualFS };
+        delete newFS[filename];
+        
+        let newCurrent = this.state.currentFile;
+        if (newCurrent === filename) {
+            const keys = Object.keys(newFS);
+            newCurrent = keys.length > 0 ? keys[0] : null;
+        }
+        
+        this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('LOG', { message: `Deleted ${filename}`, type: 'warn' });
+    }
+
+    renameFile(oldName, newName, contentBeforeRename) {
+        if (this.state.virtualFS[newName]) {
+            globalEventBus.emit('LOG', { message: 'File name already taken!', type: 'error' });
+            return false;
+        }
+
+        const newFS = { ...this.state.virtualFS };
+        // Si hay un contenido actual en el editor antes de renombrar, lo usamos en lugar del viejo virtualFS
+        newFS[newName] = contentBeforeRename !== undefined ? contentBeforeRename : newFS[oldName];
+        delete newFS[oldName];
+
+        let newCurrent = this.state.currentFile;
+        if (newCurrent === oldName) {
+            newCurrent = newName;
+        }
+
+        this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('LOG', { message: `Renamed to ${newName}`, type: 'success' });
+        return true;
+    }
+
+    renameFolder(oldPath, newPath) {
+        const prefix = oldPath + '/';
+        const newPrefix = newPath + '/';
+        const affected = Object.keys(this.state.virtualFS).filter(f => f.startsWith(prefix));
+        if (affected.length === 0) return false;
+
+        const collision = affected.some(f => this.state.virtualFS[newPrefix + f.slice(prefix.length)] !== undefined);
+        if (collision) {
+            globalEventBus.emit('LOG', { message: 'A file already exists at that folder name.', type: 'error' });
+            return false;
+        }
+
+        const newFS = { ...this.state.virtualFS };
+        let newCurrent = this.state.currentFile;
+        affected.forEach(oldFile => {
+            const newFile = newPrefix + oldFile.slice(prefix.length);
+            newFS[newFile] = newFS[oldFile];
+            delete newFS[oldFile];
+            if (this.state.currentFile === oldFile) newCurrent = newFile;
+        });
+
+        this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('LOG', { message: `Renamed folder to ${newPath}`, type: 'success' });
+        return true;
+    }
+
+    deleteFolder(folderPath) {
+        const prefix = folderPath + '/';
+        const affected = Object.keys(this.state.virtualFS).filter(f => f.startsWith(prefix));
+        if (affected.length === 0) return false;
+
+        const hasMain = affected.some(f => f.split('/').pop() === 'main.c');
+        if (hasMain) {
+            globalEventBus.emit('LOG', { message: 'Cannot delete a folder that contains main.c.', type: 'error' });
+            return false;
+        }
+
+        const newFS = { ...this.state.virtualFS };
+        affected.forEach(f => delete newFS[f]);
+
+        let newCurrent = this.state.currentFile;
+        if (affected.includes(newCurrent)) {
+            const keys = Object.keys(newFS);
+            newCurrent = keys.length > 0 ? keys[0] : null;
+        }
+
+        this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('LOG', { message: `Deleted folder ${folderPath}`, type: 'warn' });
+        return true;
+    }
+
+    updateFileContent(filename, content) {
+        const newFS = { ...this.state.virtualFS };
+        newFS[filename] = content;
+        this.emit({ virtualFS: newFS });
+    }
+
+    selectFile(filename) {
+        if (this.state.virtualFS[filename] !== undefined) {
+            this.emit({ currentFile: filename });
+        }
+    }
+
+    async loadProjectFromCloud(db, user) {
+        if (!user) return;
+        try {
+            globalEventBus.emit('LOG', { message: "Loading project from cloud...", type: 'warn' });
+            const doc = await db.collection("users").doc(user.uid).get();
+            if (doc.exists && doc.data().project) {
+                const loadedFS = doc.data().project;
+                const firstFile = Object.keys(loadedFS)[0];
+                this.emit({
+                    virtualFS: loadedFS,
+                    currentFile: firstFile,
+                    projectType: 'cloud',
+                    projectName: user.email,
+                    projectId: null
+                });
+                globalEventBus.emit('LOG', { message: "Project loaded successfully!", type: 'success' });
+            } else {
+                globalEventBus.emit('LOG', { message: "No saved project found.", type: 'info' });
+            }
+        } catch (error) {
+            globalEventBus.emit('LOG', { message: "Error loading project: " + error.message, type: 'error' });
+        }
+    }
+
+    async saveProjectToCloud(db, user, currentEditorContent) {
+        if (!user) return;
+        try {
+            // Sync editor content to virtualFS directly (no emit) before saving
+            const fsToSave = { ...this.state.virtualFS };
+            if (this.state.currentFile && currentEditorContent !== undefined) {
+                fsToSave[this.state.currentFile] = currentEditorContent;
+            }
+            
+            globalEventBus.emit('LOG', { message: "Saving project to cloud...", type: 'warn' });
+            // eslint-disable-next-line no-undef
+            await db.collection("users").doc(user.uid).set({
+                email: user.email,
+                // eslint-disable-next-line no-undef
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+                project: fsToSave
+            });
+            this.emit({ projectType: 'cloud', projectName: user.email, projectId: null });
+            globalEventBus.emit('LOG', { message: "Project saved successfully!", type: 'success' });
+        } catch (error) {
+            globalEventBus.emit('LOG', { message: "Error saving project: " + error.message, type: 'error' });
+        }
+    }
+
+    async loadExample(exampleId, examplesList) {
+        const example = examplesList.find(e => e.id === exampleId);
+        if (!example) return;
+        
+        try {
+            globalEventBus.emit('LOG', { message: `Fetching '${example.name}'...`, type: 'warn' });
+            if (example.description) globalEventBus.emit('LOG', { message: `Project Info: ${example.description}`, type: 'info' });
+            
+            const fetchedFiles = {};
+            const cacheBuster = `?t=${Date.now()}`;
+            
+            for (const file of example.files) {
+                const res = await fetch(`examples/${example.id}/${file}${cacheBuster}`);
+                if (!res.ok) throw new Error(`Failed to load ${file}`);
+                fetchedFiles[file] = await res.text();
+            }
+            
+            // Find main.c or default to first file
+            const currentFile = Object.keys(fetchedFiles).find(f => f === 'main.c' || f.endsWith('/main.c')) || Object.keys(fetchedFiles)[0];
+            
+            this.emit({
+                virtualFS: fetchedFiles,
+                currentFile: currentFile,
+                projectType: 'example',
+                projectName: example.name,
+                projectId: example.id
+            });
+            globalEventBus.emit('LOG', { message: `Workspace loaded: ${example.name}`, type: 'success' });
+            
+        } catch (err) {
+            globalEventBus.emit('LOG', { message: `Error loading workspace: ${err.message}`, type: 'error' });
+        }
+    }
+}
