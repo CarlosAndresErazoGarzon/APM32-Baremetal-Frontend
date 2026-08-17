@@ -62,7 +62,7 @@ export class DocsUI {
             md = md.replace(/\.\/img\//g, 'docs/img/');
 
             // eslint-disable-next-line no-undef
-            this.content.innerHTML = `<article class='prose prose-invert'>${marked.parse(md)}</article>`;
+            this.content.innerHTML = marked.parse(md);
         } catch (err) {
             this.content.innerHTML = "<div class='text-red-400 font-bold'>Error loading documentation. Please ensure the backend is running.</div>";
         }

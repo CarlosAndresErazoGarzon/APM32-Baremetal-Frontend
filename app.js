@@ -6,6 +6,8 @@ import { AuthBloc } from './js/blocs/AuthBloc.js';
 import { FileSystemBloc } from './js/blocs/FileSystemBloc.js';
 import { CompilerBloc } from './js/blocs/CompilerBloc.js';
 import { SerialBloc } from './js/blocs/SerialBloc.js';
+import { ModeBloc } from './js/blocs/ModeBloc.js';
+import { LearnBloc } from './js/blocs/LearnBloc.js';
 
 // UIs
 import { AuthUI } from './js/ui/AuthUI.js';
@@ -17,6 +19,12 @@ import { DocsUI } from './js/ui/DocsUI.js';
 import { HardwareUI } from './js/ui/HardwareUI.js';
 import { initBrandingTitle } from './js/ui/BrandingUI.js';
 import { AutoSaveUI } from './js/ui/AutoSaveUI.js';
+import { ModeSwitcherUI } from './js/ui/ModeSwitcherUI.js';
+import { CodeTheoryTabsUI } from './js/ui/CodeTheoryTabsUI.js';
+import { LevelListUI } from './js/ui/LevelListUI.js';
+import { TheoryUI } from './js/ui/TheoryUI.js';
+import { TestResultsUI } from './js/ui/TestResultsUI.js';
+import { RunUI } from './js/ui/RunUI.js';
 
 // Orchestrator initialization
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,16 +33,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const fsBloc = new FileSystemBloc();
     const compilerBloc = new CompilerBloc();
     const serialBloc = new SerialBloc();
+    const modeBloc = new ModeBloc();
+    const learnBloc = new LearnBloc();
 
     // 2. Instantiate UIs and Inject Dependencies
     const authUI = new AuthUI(authBloc);
-    const editorUI = new EditorUI(fsBloc);
+    const editorUI = new EditorUI(fsBloc, modeBloc, learnBloc);
     const sidebarUI = new SidebarUI(fsBloc, () => editorUI.getContent());
-    const terminalUI = new TerminalUI(compilerBloc, fsBloc, serialBloc, CONFIG.API_URL);
+    const terminalUI = new TerminalUI(compilerBloc, fsBloc, serialBloc, CONFIG.API_URL, modeBloc);
     const serialUI = new SerialUI(serialBloc);
     const docsUI = new DocsUI();
     const hardwareUI = new HardwareUI(serialBloc);
     const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, () => editorUI.getContent());
+    const modeSwitcherUI = new ModeSwitcherUI(modeBloc);
+    const codeTheoryTabsUI = new CodeTheoryTabsUI(modeBloc, learnBloc, editorUI);
+    const levelListUI = new LevelListUI(learnBloc);
+    const theoryUI = new TheoryUI(learnBloc);
+    const testResultsUI = new TestResultsUI();
+    const runUI = new RunUI(learnBloc, CONFIG.API_URL, () => editorUI.getContent());
 
     // 3. System Initialization
     initBrandingTitle();
@@ -75,6 +91,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         })
         .catch(err => console.warn("Could not load examples registry:", err));
+
+    // Load Learn mode levels (independent of examples above -- different
+    // toolchain, different content, only fetched once and cached in LearnBloc)
+    learnBloc.loadLevelsIndex();
 
     // 4. Cross-Bloc wiring using EventBus (if necessary)
     globalEventBus.on('AUTH_LOGOUT', () => {

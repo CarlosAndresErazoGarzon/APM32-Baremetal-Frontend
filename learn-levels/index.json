@@ -1,0 +1,385 @@
+[
+    {
+        "id": "intro",
+        "title": "Unidad 1: Fundamentos de C",
+        "order": 1,
+        "prerequisites": [],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M01: Baliza de Arranque",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M02: Telemetria de Canal",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M03: Consumo y Bufer",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M04: Escalas ADC y Casting",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "operadores",
+        "title": "Unidad 2: Operadores y Formato",
+        "order": 2,
+        "prerequisites": [
+            "intro"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M05: Trama de Sensor NMEA",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M06: Enclavamiento Termico",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M07: Registro Bitwise",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M08: Mascaras GPIO",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "control_flujo",
+        "title": "Unidad 3: Estructuras de Control",
+        "order": 3,
+        "prerequisites": [
+            "operadores"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M09: Termostato de CPU",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M10: Nivel de Bateria ADC",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M11: Decodificador UART",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M12: Secuenciador Vial",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "bucles",
+        "title": "Unidad 4: Bucles e Iteraciones",
+        "order": 4,
+        "prerequisites": [
+            "control_flujo"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M13: Acumulador de Muestras",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M14: Polling de Carga",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M15: Filtro de Ruido",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M16: Secuencia de Ignicion",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "arreglos",
+        "title": "Unidad 5: Arreglos y Cadenas",
+        "order": 5,
+        "prerequisites": [
+            "bucles"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M17: Detector de Picos",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M18: Analizador de Trama",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M19: Matriz Termica 2D",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M20: Inversion de Bufer",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "funciones",
+        "title": "Unidad 6: Funciones y Modularidad",
+        "order": 6,
+        "prerequisites": [
+            "arreglos"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M21: Conversion de Sensores",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M22: Filtro de Promedio",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M23: Contador Estatico",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M24: Limitador Clamp",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "estructuras",
+        "title": "Unidad 7: Estructuras de Datos",
+        "order": 7,
+        "prerequisites": [
+            "funciones"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M25: Descriptor de Sensor",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M26: Tabla de Sensores I2C",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M27: Nodo Maestro Pico",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M28: Registro Timestamp",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "archivos",
+        "title": "Unidad 8: Manejo de Archivos (I/O)",
+        "order": 8,
+        "prerequisites": [
+            "estructuras"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M29: Inicializar Caja Negra",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M30: Registro Append",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M31: Lector de Config",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M32: Estadistica Numerica",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "bitwise_avanzado",
+        "title": "Unidad 9: Bitwise y Registros Avanzados",
+        "order": 9,
+        "prerequisites": [
+            "archivos"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M37: Banderas de Estado",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M38: Prescaler de Reloj",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M39: Modificacion Atomica",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M40: Trama de 16 Bits",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "apuntadores",
+        "title": "Unidad 10: Apuntadores y Memoria",
+        "order": 10,
+        "prerequisites": [
+            "bitwise_avanzado"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M33: Mutacion en RAM",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M34: Calibracion In-Place",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M35: Punteros a Struct (->)",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M36: Aritmetica de Punteros",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "maquinas_estado",
+        "title": "Unidad 11: Maquinas de Estado (FSM)",
+        "order": 11,
+        "prerequisites": [
+            "apuntadores"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M41: Interruptor de Baliza",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M42: Semaforo de Estado del Sistema",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M43: Maquina Anti-Rebote",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M44: Despachador Multi-Maquina",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    }
+]

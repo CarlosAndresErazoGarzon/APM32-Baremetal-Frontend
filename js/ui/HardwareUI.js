@@ -62,16 +62,13 @@ export class HardwareUI {
         this.updateCoreState(state.isConnected ? 'Running' : 'Idle');
     }
 
+    // Flat bracketed text, no badge/pill -- matches the rest of the
+    // MHRD-style status indicators (coreStateTag, [OK], [M01], ...).
     updateCoreState(label) {
         if (!this.coreStateTag) return;
 
-        this.coreStateTag.innerText = label.toUpperCase();
-        this.coreStateTag.className = "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all duration-300";
-
-        if (label === 'Running') {
-            this.coreStateTag.classList.add('bg-emerald-500/20', 'text-emerald-400', 'border', 'border-emerald-500/30');
-        } else {
-            this.coreStateTag.classList.add('bg-slate-500/20', 'text-slate-400', 'border', 'border-slate-500/30');
-        }
+        this.coreStateTag.innerText = `[${label.toUpperCase()}]`;
+        this.coreStateTag.className = "text-[10px] font-mono font-bold transition-colors duration-300";
+        this.coreStateTag.classList.add(label === 'Running' ? 'text-[var(--btn-green-text)]' : 'text-[var(--sidebar-text)]');
     }
 }

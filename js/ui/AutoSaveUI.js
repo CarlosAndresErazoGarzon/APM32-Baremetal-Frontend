@@ -1,4 +1,5 @@
 import { globalEventBus } from '../core/EventBus.js';
+import { toggleFlexVisible } from '../core/domUtils.js';
 
 const STORAGE_KEY = 'apm32_autosave_enabled';
 const DEBOUNCE_MS = 2500;
@@ -38,12 +39,7 @@ export class AutoSaveUI {
     }
 
     render(state) {
-        if (!this.wrapper) return;
-        // 'flex'/'hidden' toggled together -- see TerminalUI's toggleFlexVisible
-        // for why these two need to move as a pair rather than just 'hidden'.
-        const show = !!state.user;
-        this.wrapper.classList.toggle('hidden', !show);
-        this.wrapper.classList.toggle('flex', show);
+        toggleFlexVisible(this.wrapper, !!state.user);
     }
 
     scheduleAutosave() {

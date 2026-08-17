@@ -1,5 +1,6 @@
 import { Bloc } from '../core/Bloc.js';
 import { globalEventBus } from '../core/EventBus.js';
+import { parseGccErrors } from '../core/gccErrorParser.js';
 
 export class CompilerBloc extends Bloc {
     get initialState() {
@@ -59,8 +60,11 @@ export class CompilerBloc extends Bloc {
             globalEventBus.emit('COMPILER_STATUS', { status: 'error' });
             
             // Emit syntax error markers if available (using regex on gcc output)
-            this._parseCompileErrors(error.message);
-            
+            const markers = parseGccErrors(error.message);
+            if (markers.length > 0) {
+                globalEventBus.emit('COMPILER_ERRORS', { markers });
+            }
+
             return null;
         }
     }
@@ -115,28 +119,5 @@ clean:
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         globalEventBus.emit('LOG', { message: "Binary downloaded.", type: 'success' });
-    }
-
-    _parseCompileErrors(errorText) {
-        const markers = [];
-        const lines = errorText.split('\\n');
-        
-        for (const line of lines) {
-            const match = line.match(/^([a-zA-Z0-9_/\\\\.]+):(\\d+):(\\d+):\\s+(error|warning):\\s+(.*)$/);
-            if (match) {
-                const [, file, lineNum, colNum, severity, msg] = match;
-                markers.push({
-                    file: file,
-                    line: parseInt(lineNum, 10),
-                    column: parseInt(colNum, 10),
-                    severity: severity === 'error' ? 8 : 4, // 8=Error, 4=Warning in Monaco
-                    message: msg
-                });
-            }
-        }
-
-        if (markers.length > 0) {
-            globalEventBus.emit('COMPILER_ERRORS', { markers });
-        }
     }
 }

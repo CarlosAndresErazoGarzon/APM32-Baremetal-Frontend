@@ -1,11 +1,13 @@
 import { globalEventBus } from '../core/EventBus.js';
+import { toggleFlexVisible } from '../core/domUtils.js';
 
 export class TerminalUI {
-    constructor(compilerBloc, fsBloc, serialBloc, apiUrl) {
+    constructor(compilerBloc, fsBloc, serialBloc, apiUrl, modeBloc) {
         this.compilerBloc = compilerBloc;
         this.fsBloc = fsBloc;
         this.serialBloc = serialBloc;
         this.apiUrl = apiUrl;
+        this.modeBloc = modeBloc;
 
         this.logBox = document.getElementById('logBox');
         this.flashBtn = document.getElementById('flashBtn');
@@ -15,18 +17,24 @@ export class TerminalUI {
         this.toggleTerminalBtn = document.getElementById('toggleTerminalBtn');
         this.clearLogBtn = document.getElementById('clearLogBtn');
 
-        // Logs / Serial Monitor tabs (share the same panel, one visible at a time)
+        // Logs / Serial Monitor / Results tabs (share the same panel, one visible at a time)
         this.logsTabBtn = document.getElementById('logsTabBtn');
         this.serialTabBtn = document.getElementById('serialTabBtn');
+        this.resultsTabBtn = document.getElementById('resultsTabBtn');
         this.logsControls = document.getElementById('logsControls');
         this.serialControls = document.getElementById('serialControls');
+        this.resultsControls = document.getElementById('resultsControls');
         this.serialOutput = document.getElementById('serialOutput');
+        this.resultsOutput = document.getElementById('resultsOutput');
+
+        this.currentTab = 'logs';
 
         this.initEventListeners();
         this.initTabSwitching();
         this.initEventBusSubscribers();
 
         this.compilerBloc.subscribe(this.render.bind(this));
+        if (this.modeBloc) this.modeBloc.subscribe(this.onModeChange.bind(this));
     }
 
     initTabSwitching() {
@@ -36,28 +44,34 @@ export class TerminalUI {
         if (this.serialTabBtn) {
             this.serialTabBtn.onclick = () => this.switchTerminalTab('serial');
         }
+        if (this.resultsTabBtn) {
+            this.resultsTabBtn.onclick = () => this.switchTerminalTab('results');
+        }
     }
 
     switchTerminalTab(tab) {
-        const showLogs = tab === 'logs';
+        this.currentTab = tab;
 
-        if (this.logsTabBtn) this.logsTabBtn.classList.toggle('active', showLogs);
-        if (this.serialTabBtn) this.serialTabBtn.classList.toggle('active', !showLogs);
+        if (this.logsTabBtn) this.logsTabBtn.classList.toggle('active', tab === 'logs');
+        if (this.serialTabBtn) this.serialTabBtn.classList.toggle('active', tab === 'serial');
+        if (this.resultsTabBtn) this.resultsTabBtn.classList.toggle('active', tab === 'results');
 
-        // Toggle 'flex'/'hidden' together (never leave both, or neither, applied --
-        // Tailwind's utility order between two same-specificity display classes
-        // isn't something to rely on).
-        this.toggleFlexVisible(this.logsControls, showLogs);
-        this.toggleFlexVisible(this.serialControls, !showLogs);
+        toggleFlexVisible(this.logsControls, tab === 'logs');
+        toggleFlexVisible(this.serialControls, tab === 'serial');
+        toggleFlexVisible(this.resultsControls, tab === 'results');
 
-        if (this.logBox) this.logBox.classList.toggle('hidden', !showLogs);
-        if (this.serialOutput) this.serialOutput.classList.toggle('hidden', showLogs);
+        if (this.logBox) this.logBox.classList.toggle('hidden', tab !== 'logs');
+        if (this.serialOutput) this.serialOutput.classList.toggle('hidden', tab !== 'serial');
+        if (this.resultsOutput) this.resultsOutput.classList.toggle('hidden', tab !== 'results');
     }
 
-    toggleFlexVisible(el, show) {
-        if (!el) return;
-        el.classList.toggle('hidden', !show);
-        el.classList.toggle('flex', show);
+    // Learn mode is the only place the Results tab is even visible (see
+    // ModeSwitcherUI) -- if the user flips back to IDE mode while parked on
+    // it, land somewhere that's still visible instead of a hidden pane.
+    onModeChange(modeState) {
+        if (modeState.mode === 'ide' && this.currentTab === 'results') {
+            this.switchTerminalTab('logs');
+        }
     }
 
     initEventListeners() {
@@ -93,12 +107,15 @@ export class TerminalUI {
                 const isCollapsed = this.terminalPane.classList.contains('h-8');
                 if (isCollapsed) {
                     this.terminalPane.classList.remove('h-8');
-                    this.terminalPane.classList.add('h-48');
-                    this.toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(0deg)';
+                    this.terminalPane.classList.add('h-64');
+                    const svg = this.toggleTerminalBtn.querySelector('svg');
+                    if (svg) svg.style.transform = 'rotate(0deg)';
                 } else {
+                    this.terminalPane.classList.remove('h-64');
                     this.terminalPane.classList.remove('h-48');
                     this.terminalPane.classList.add('h-8');
-                    this.toggleTerminalBtn.querySelector('svg').style.transform = 'rotate(180deg)';
+                    const svg = this.toggleTerminalBtn.querySelector('svg');
+                    if (svg) svg.style.transform = 'rotate(180deg)';
                 }
             };
         }
@@ -169,23 +186,19 @@ export class TerminalUI {
     logMessage(msg, type="info") {
         if (!this.logBox) return;
         const div = document.createElement('div');
-        div.className = "mb-1 text-sm border-l-2 pl-2 ";
-
-        // The dark-mode -400 shades (bright pastels) read fine on near-black but
-        // wash out on the light theme's white background -- swap for a darker,
-        // WCAG-friendlier shade of the same hue when light-theme is active.
         const isDark = !document.body.classList.contains('light-theme');
+        div.className = `mb-1 text-[11px] font-mono border-l-2 pl-2 ${isDark ? "text-zinc-400" : "text-slate-700 font-medium"} leading-relaxed `;
+
         switch (type) {
-            case 'error': div.className += isDark ? "border-red-500 text-red-400" : "border-red-600 text-red-700"; break;
-            case 'warn': div.className += isDark ? "border-yellow-500 text-yellow-400" : "border-yellow-600 text-yellow-700"; break;
-            case 'success': div.className += isDark ? "border-green-500 text-green-400" : "border-green-600 text-green-700"; break;
-            default: div.className += isDark ? "border-blue-500 text-blue-300" : "border-blue-600 text-blue-700"; break;
+            case 'error': div.className += isDark ? "border-red-500" : "border-red-600"; break;
+            case 'warn': div.className += isDark ? "border-yellow-500" : "border-yellow-600"; break;
+            case 'success': div.className += isDark ? "border-emerald-400" : "border-emerald-600"; break;
+            default: div.className += isDark ? "border-zinc-600" : "border-slate-400"; break;
         }
 
-        // Inline style (not a Tailwind arbitrary-value class) so it doesn't depend
-        // on the CDN JIT re-scanning classes injected via innerHTML at runtime.
         const timestamp = new Date().toLocaleTimeString();
-        div.innerHTML = `<span class="text-xs" style="color: var(--sidebar-text); opacity: 0.6;">[${timestamp}]</span> ${msg}`;
+        const timeColor = isDark ? "text-zinc-400" : "text-slate-500";
+        div.innerHTML = `<span class="text-[10px] ${timeColor} font-mono select-none mr-1.5">[${timestamp}]</span><span class="${isDark ? 'text-zinc-400' : 'text-slate-700'}">${msg}</span>`;
         this.logBox.appendChild(div);
         this.logBox.scrollTop = this.logBox.scrollHeight;
     }
