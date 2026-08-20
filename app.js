@@ -73,7 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const serialUI = new SerialUI(serialBloc);
     const docsUI = new DocsUI();
     const hardwareUI = new HardwareUI(dapBloc);
-    const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, () => editorUI.getContent());
+    const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, () => editorUI.getContent(), modeBloc, 'ide', {
+        wrapper: 'autoSaveWrapper', checkbox: 'autoSaveToggle', storageKey: 'apm32_autosave_enabled'
+    });
+    const playgroundAutoSaveUI = new AutoSaveUI(authBloc, playgroundFsBloc, () => editorUI.getContent(), modeBloc, 'playground', {
+        wrapper: 'playgroundAutoSaveWrapper', checkbox: 'playgroundAutoSaveToggle', storageKey: 'apm32_autosave_enabled_playground'
+    });
     const modeSwitcherUI = new ModeSwitcherUI(modeBloc);
     const codeTheoryTabsUI = new CodeTheoryTabsUI(modeBloc, learnBloc, editorUI);
     const levelListUI = new LevelListUI(learnBloc);
@@ -132,14 +137,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.dynamicExamples && window.dynamicExamples.length > 0) {
             fsBloc.loadExample(window.dynamicExamples[0].id, window.dynamicExamples);
         }
+        // Back to the guest bucket -- otherwise Learn mode would keep
+        // showing whichever account was just signed out of.
+        learnBloc.setNamespace(null);
     });
 
     // Pull the user's saved project in as soon as they're identified -- otherwise
     // whatever was on screen before login (a default example, a scratchpad) stays
     // there with no indication it isn't the user's actual project.
-    globalEventBus.on('AUTH_LOGIN', ({ user, db }) => {
+    globalEventBus.on('AUTH_LOGIN', async ({ user, db }) => {
         fsBloc.loadProjectFromCloud(db, user);
         playgroundFsBloc.loadProjectFromCloud(db, user);
+        // Namespace switch has to land (and finish reading this uid's own
+        // local progress) before the cloud merge below runs -- otherwise
+        // loadProgressFromCloud unions the cloud doc with whatever was
+        // still in memory from the previous identity on this browser.
+        await learnBloc.setNamespace(user.uid);
         learnBloc.loadProgressFromCloud(db, user);
     });
 
