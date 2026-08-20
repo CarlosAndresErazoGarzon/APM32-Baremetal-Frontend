@@ -122,7 +122,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     exampleSelector.appendChild(opt);
                 });
             }
-            if (data.length > 0) {
+            // Skip the default-example auto-load if the constructor already
+            // restored a local draft -- otherwise this fires moments later
+            // and silently overwrites it, defeating FileSystemBloc's own
+            // local persistence (confirmed as the actual cause of a
+            // reported "my file disappeared on reload" bug: Playground has
+            // no equivalent auto-load and its restore worked fine).
+            if (data.length > 0 && !fsBloc.restoredFromLocal) {
                 fsBloc.loadExample(data[0].id, data);
             }
         })
@@ -134,26 +140,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 4. Cross-Bloc wiring using EventBus (if necessary)
     globalEventBus.on('AUTH_LOGOUT', () => {
-        if (window.dynamicExamples && window.dynamicExamples.length > 0) {
+        // Back to each bloc's own guest bucket FIRST -- otherwise IDE/
+        // Playground/Learn would all keep showing whichever account was
+        // just signed out of.
+        fsBloc.setNamespace(null);
+        playgroundFsBloc.setNamespace(null);
+        learnBloc.setNamespace(null);
+        // Same guard as the initial load below -- don't clobber a guest
+        // draft setNamespace() just restored.
+        if (!fsBloc.restoredFromLocal && window.dynamicExamples && window.dynamicExamples.length > 0) {
             fsBloc.loadExample(window.dynamicExamples[0].id, window.dynamicExamples);
         }
-        // Back to the guest bucket -- otherwise Learn mode would keep
-        // showing whichever account was just signed out of.
-        learnBloc.setNamespace(null);
     });
 
     // Pull the user's saved project in as soon as they're identified -- otherwise
     // whatever was on screen before login (a default example, a scratchpad) stays
     // there with no indication it isn't the user's actual project.
     globalEventBus.on('AUTH_LOGIN', async ({ user, db }) => {
+        // Namespace switch has to land (and finish reading this uid's own
+        // local draft/progress) BEFORE the cloud calls below -- otherwise
+        // loadProjectFromCloud's "no saved project found" no-op path (or
+        // loadProgressFromCloud's union-merge) would leave whichever
+        // identity was previously using this browser still on screen.
+        fsBloc.setNamespace(user.uid);
+        playgroundFsBloc.setNamespace(user.uid);
+        await learnBloc.setNamespace(user.uid);
+
         fsBloc.loadProjectFromCloud(db, user);
         playgroundFsBloc.loadProjectFromCloud(db, user);
-        // Namespace switch has to land (and finish reading this uid's own
-        // local progress) before the cloud merge below runs -- otherwise
-        // loadProgressFromCloud unions the cloud doc with whatever was
-        // still in memory from the previous identity on this browser.
-        await learnBloc.setNamespace(user.uid);
         learnBloc.loadProgressFromCloud(db, user);
+    });
+
+    // Local persistence for IDE/Playground -- reported bug: reloading the
+    // page always lost unsaved work, since FileSystemBloc only wrote to
+    // localStorage on a file SWITCH or an explicit save, never on plain
+    // typing. Debounced (not per-keystroke) the same way AutoSaveUI
+    // debounces its cloud save. Mode-gated for the same reason AutoSaveUI's
+    // save is: the Monaco editor is shared across all three modes and
+    // fires this event regardless of which one is active.
+    let localSyncTimer = null;
+    globalEventBus.on('EDITOR_CONTENT_CHANGED', () => {
+        clearTimeout(localSyncTimer);
+        localSyncTimer = setTimeout(() => {
+            const mode = modeBloc.state.mode;
+            if (mode === 'ide' && fsBloc.state.currentFile) {
+                fsBloc.updateFileContent(fsBloc.state.currentFile, editorUI.getContent());
+            } else if (mode === 'playground' && playgroundFsBloc.state.currentFile) {
+                playgroundFsBloc.updateFileContent(playgroundFsBloc.state.currentFile, editorUI.getContent());
+            }
+        }, 800);
     });
 
     // A test just passed (LearnBloc.runTests) -- push progress to the

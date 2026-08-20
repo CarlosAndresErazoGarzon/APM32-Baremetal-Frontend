@@ -12,12 +12,95 @@ export class FileSystemBloc extends Bloc {
     constructor(seedFiles = null, cloudField = 'project') {
         super();
         this.cloudField = cloudField;
+        // Namespace-scoped localStorage mirror of virtualFS -- reported bug:
+        // without any of this, reloading the page always lost unsaved work
+        // (this bloc never persisted anything itself; only an explicit
+        // SAVE CLOUD, which needs an account, did). Same account-isolation
+        // design as LearnBloc.setNamespace() (see that file): `namespace`
+        // is null/guest until AUTH_LOGIN sets it to a uid, so two different
+        // accounts signed into the same browser -- or a signed-in account
+        // and a later guest -- never inherit each other's local draft.
+        this.namespace = null;
+        this.seedFiles = seedFiles;
         if (seedFiles) {
             const firstFile = Object.keys(seedFiles)[0] || null;
             // Direct state overwrite, not emit() -- nothing has subscribed
             // yet this early in construction, so there's nothing to notify.
             this._state = { ...this._state, virtualFS: seedFiles, currentFile: firstFile };
         }
+
+        const draft = this.readLocalDraft();
+        // app.js checks this before its own default-example auto-load,
+        // which would otherwise silently clobber a just-restored draft
+        // moments after construction (found while fixing this bug: only
+        // the IDE instance has that auto-load, which is exactly why the
+        // Playground restore worked on the first pass and IDE's didn't).
+        this.restoredFromLocal = !!draft;
+        if (draft) {
+            this._state = { ...this._state, virtualFS: draft.virtualFS, currentFile: draft.currentFile };
+        }
+
+        // Mirrors every future state change to localStorage -- covers all
+        // the existing mutating methods (createFile, updateFileContent,
+        // ...) automatically, without touching each one individually.
+        this.subscribe(() => this.persistLocal());
+    }
+
+    localDraftKey() {
+        return `apm32_local_fs_${this.cloudField}_${this.namespace || 'guest'}`;
+    }
+
+    readLocalDraft() {
+        try {
+            const raw = localStorage.getItem(this.localDraftKey());
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    persistLocal() {
+        try {
+            localStorage.setItem(this.localDraftKey(), JSON.stringify({
+                virtualFS: this.state.virtualFS,
+                currentFile: this.state.currentFile
+            }));
+        } catch {
+            // Quota exceeded or localStorage unavailable (private browsing,
+            // etc.) -- local persistence is a convenience, not something
+            // worth surfacing an error for.
+        }
+    }
+
+    // Switches which localStorage bucket this instance reads/writes --
+    // app.js calls this on AUTH_LOGIN (uid) and AUTH_LOGOUT (null), before
+    // loadProjectFromCloud(), so a signed-in account never starts from
+    // whichever identity was previously using this browser.
+    setNamespace(namespace) {
+        const next = namespace || null;
+        if (this.namespace === next) return;
+        this.namespace = next;
+
+        const draft = this.readLocalDraft();
+        // Same flag the constructor sets, kept up to date here too -- both
+        // are "did this instance just get a real draft from localStorage,
+        // or a fresh/seed slate" for app.js's example-auto-load guard.
+        this.restoredFromLocal = !!draft;
+        if (draft) {
+            this.emit({ virtualFS: draft.virtualFS, currentFile: draft.currentFile });
+            return;
+        }
+
+        // No local draft under the new identity -- back to a clean slate
+        // (the seed, or this bloc's own hardcoded default), not just the
+        // file content but the project metadata that goes with a fresh
+        // instance too.
+        const fresh = this.initialState;
+        if (this.seedFiles) {
+            fresh.virtualFS = this.seedFiles;
+            fresh.currentFile = Object.keys(this.seedFiles)[0] || null;
+        }
+        this.emit(fresh);
     }
 
     get initialState() {
@@ -219,7 +302,7 @@ export class FileSystemBloc extends Bloc {
     async saveProjectToCloud(db, user, currentEditorContent) {
         if (!user) return;
         try {
-            // Sync editor content to virtualFS directly (no emit) before saving
+            // Sync editor content into what gets saved...
             const fsToSave = { ...this.state.virtualFS };
             if (this.state.currentFile && currentEditorContent !== undefined) {
                 fsToSave[this.state.currentFile] = currentEditorContent;
@@ -237,7 +320,15 @@ export class FileSystemBloc extends Bloc {
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
                 [this.cloudField]: fsToSave
             }, { merge: true });
-            this.emit({ projectType: 'cloud', projectName: user.email, projectId: null });
+            // ...AND into this.state.virtualFS itself, in the same emit as
+            // projectType/projectName below -- not just the local fsToSave
+            // copy used for the write above. A real reported bug without
+            // this: the emit still notifies EditorUI's render()/
+            // renderPlayground(), whose stale-content self-heal check saw
+            // the (unpatched) old virtualFS disagree with the live editor
+            // content and reverted the editor right back -- SAVE CLOUD was
+            // erasing the very edit it had just saved to Firestore.
+            this.emit({ virtualFS: fsToSave, projectType: 'cloud', projectName: user.email, projectId: null });
             globalEventBus.emit('LOG', { message: "Project saved successfully!", type: 'success' });
         } catch (error) {
             globalEventBus.emit('LOG', { message: "Error saving project: " + error.message, type: 'error' });

@@ -22,6 +22,10 @@
  * then, separately, "./test" -- so they're kept in `this.sessionBinaries`
  * instead, a private base64 bucket only this class ever sees, sent along
  * with every exec() call and refreshed from every response.
+ *
+ * Tab completes filenames/compiled-binary names (see handleTabComplete())
+ * -- not PATH commands, this client has no authoritative list of what the
+ * sandbox's shell actually has installed.
  */
 export class ConsoleUI {
     constructor(playgroundBloc, playgroundFsBloc, apiUrl, editorGetter) {
@@ -44,6 +48,12 @@ export class ConsoleUI {
                 if (e.key === 'Enter') {
                     e.preventDefault();
                     this.execute();
+                } else if (e.key === 'Tab') {
+                    // Default Tab behavior would jump focus to the next
+                    // element on the page -- a real terminal keeps focus
+                    // and completes instead.
+                    e.preventDefault();
+                    this.handleTabComplete();
                 }
             });
         }
@@ -55,6 +65,19 @@ export class ConsoleUI {
             this.clearBtn.onclick = () => {
                 this.output.innerHTML = '';
                 this.sessionBinaries = {};
+                // Sync the live editor content into virtualFS BEFORE the
+                // state change below -- same reason execute() does it (see
+                // that method's own comment): setBinaryNames() emits, which
+                // notifies EditorUI.renderPlayground(), and its cloud-load
+                // "self-heal" check can't tell "unsynced in-progress typing"
+                // apart from "a stale cloud copy" -- it saw them disagree
+                // and reverted the editor, silently discarding whatever was
+                // just typed. Confirmed as a real reported bug: pressing
+                // Clear on the terminal was erasing unsaved edits.
+                const state = this.playgroundFsBloc.state;
+                if (state.currentFile) {
+                    this.playgroundFsBloc.updateFileContent(state.currentFile, this.getEditorContent());
+                }
                 this.playgroundFsBloc.setBinaryNames([]);
             };
         }
@@ -110,6 +133,68 @@ export class ConsoleUI {
             // show that they exist -- see FileSystemBloc.setBinaryNames().
             this.playgroundFsBloc.setBinaryNames(Object.keys(this.sessionBinaries));
         }
+    }
+
+    // Filename/binary completion only -- no PATH command-name completion,
+    // since the real available command set (gcc, make, coreutils...) lives
+    // in the sandbox's own PATH, not anywhere this client knows about, and
+    // a hardcoded guess could confidently complete to something that
+    // doesn't actually exist there. Filenames are something this client
+    // genuinely has an authoritative answer for: virtualFS's own keys plus
+    // this session's compiled binaries (offered "./name", how you'd
+    // actually run one).
+    handleTabComplete() {
+        const value = this.input.value;
+        const cursorPos = this.input.selectionStart;
+        const before = value.slice(0, cursorPos);
+        const match = before.match(/(\S*)$/);
+        const partial = match ? match[1] : '';
+        if (!partial) return; // bare Tab on empty/trailing-space -- nothing to anchor a guess to
+
+        const candidates = this.completionCandidates(partial);
+        if (candidates.length === 0) return;
+
+        if (candidates.length === 1) {
+            this.applyCompletion(before, partial, candidates[0], value, cursorPos);
+            return;
+        }
+
+        // Several matches -- complete as far as their shared prefix goes
+        // (same as a real shell's double-Tab-adjacent behavior), and list
+        // the options so pressing Tab again isn't a silent no-op.
+        const commonPrefix = this.longestCommonPrefix(candidates);
+        if (commonPrefix.length > partial.length) {
+            this.applyCompletion(before, partial, commonPrefix, value, cursorPos);
+        } else {
+            this.appendLine(candidates.join('  '), 'stdout');
+        }
+    }
+
+    completionCandidates(partial) {
+        const names = new Set();
+        Object.keys(this.playgroundFsBloc.state.virtualFS).forEach(f => names.add(f));
+        Object.keys(this.sessionBinaries).forEach(f => names.add(`./${f}`));
+        return [...names].filter(n => n.startsWith(partial)).sort();
+    }
+
+    applyCompletion(before, partial, completion, fullValue, cursorPos) {
+        const prefix = before.slice(0, before.length - partial.length);
+        const after = fullValue.slice(cursorPos);
+        const newValue = prefix + completion + after;
+        this.input.value = newValue;
+        const newCursor = (prefix + completion).length;
+        this.input.setSelectionRange(newCursor, newCursor);
+    }
+
+    longestCommonPrefix(strings) {
+        let prefix = strings[0];
+        for (let i = 1; i < strings.length; i++) {
+            while (!strings[i].startsWith(prefix)) {
+                prefix = prefix.slice(0, -1);
+                if (!prefix) return '';
+            }
+        }
+        return prefix;
     }
 
     setBusy(busy) {
