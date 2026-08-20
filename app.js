@@ -6,12 +6,15 @@ import { AuthBloc } from './js/blocs/AuthBloc.js';
 import { FileSystemBloc } from './js/blocs/FileSystemBloc.js';
 import { CompilerBloc } from './js/blocs/CompilerBloc.js';
 import { SerialBloc } from './js/blocs/SerialBloc.js';
+import { DapBloc } from './js/blocs/DapBloc.js';
 import { ModeBloc } from './js/blocs/ModeBloc.js';
 import { LearnBloc } from './js/blocs/LearnBloc.js';
+import { PlaygroundBloc } from './js/blocs/PlaygroundBloc.js';
 
 // UIs
 import { AuthUI } from './js/ui/AuthUI.js';
 import { SidebarUI } from './js/ui/SidebarUI.js';
+import { SidebarDrawerUI } from './js/ui/SidebarDrawerUI.js';
 import { EditorUI } from './js/ui/EditorUI.js';
 import { TerminalUI } from './js/ui/TerminalUI.js';
 import { SerialUI } from './js/ui/SerialUI.js';
@@ -25,25 +28,51 @@ import { LevelListUI } from './js/ui/LevelListUI.js';
 import { TheoryUI } from './js/ui/TheoryUI.js';
 import { TestResultsUI } from './js/ui/TestResultsUI.js';
 import { RunUI } from './js/ui/RunUI.js';
+import { ConsoleUI } from './js/ui/ConsoleUI.js';
+import { initHotkeys } from './js/ui/HotkeysUI.js';
+
+// Playground's seed is plain host C, no APM32 headers -- this is a freeform
+// space, not an ARM firmware project (see FileSystemBloc.js's constructor
+// params and PlaygroundBloc.js's runner).
+const PLAYGROUND_SEED = {
+    'main.c': '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, APM32!\\n");\n    return 0;\n}\n'
+};
 
 // Orchestrator initialization
 document.addEventListener('DOMContentLoaded', () => {
     // 1. Instantiate BLoCs
     const authBloc = new AuthBloc();
     const fsBloc = new FileSystemBloc();
+    // Sibling FileSystemBloc instance for Playground -- own seed content,
+    // own cloud field (`playgroundProject`, a sibling of `project` on the
+    // same users/{uid} document), so the two projects never collide.
+    const playgroundFsBloc = new FileSystemBloc(PLAYGROUND_SEED, 'playgroundProject');
     const compilerBloc = new CompilerBloc();
     const serialBloc = new SerialBloc();
+    const dapBloc = new DapBloc();
     const modeBloc = new ModeBloc();
     const learnBloc = new LearnBloc();
+    const playgroundBloc = new PlaygroundBloc();
 
     // 2. Instantiate UIs and Inject Dependencies
     const authUI = new AuthUI(authBloc);
-    const editorUI = new EditorUI(fsBloc, modeBloc, learnBloc);
+    const editorUI = new EditorUI(fsBloc, modeBloc, learnBloc, playgroundFsBloc);
     const sidebarUI = new SidebarUI(fsBloc, () => editorUI.getContent());
-    const terminalUI = new TerminalUI(compilerBloc, fsBloc, serialBloc, CONFIG.API_URL, modeBloc);
+    // Second SidebarUI instance targeting Playground's own sibling panel
+    // markup -- #mobileMenuBtn/#sidebar/#sidebarOverlay are shared, single-
+    // owner elements now, handled once by SidebarDrawerUI below instead of
+    // by each SidebarUI instance (that would double-bind the hamburger).
+    const playgroundSidebarUI = new SidebarUI(playgroundFsBloc, () => editorUI.getContent(), {
+        fileTreeList: 'playgroundFileTreeList',
+        newFileBtn: 'playgroundNewFileBtn',
+        projectBadge: 'playgroundProjectBadge',
+        exampleSelector: null
+    });
+    const sidebarDrawerUI = new SidebarDrawerUI();
+    const terminalUI = new TerminalUI(compilerBloc, fsBloc, dapBloc, CONFIG.API_URL, modeBloc);
     const serialUI = new SerialUI(serialBloc);
     const docsUI = new DocsUI();
-    const hardwareUI = new HardwareUI(serialBloc);
+    const hardwareUI = new HardwareUI(dapBloc);
     const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, () => editorUI.getContent());
     const modeSwitcherUI = new ModeSwitcherUI(modeBloc);
     const codeTheoryTabsUI = new CodeTheoryTabsUI(modeBloc, learnBloc, editorUI);
@@ -51,9 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const theoryUI = new TheoryUI(learnBloc);
     const testResultsUI = new TestResultsUI();
     const runUI = new RunUI(learnBloc, CONFIG.API_URL, () => editorUI.getContent());
+    const consoleUI = new ConsoleUI(playgroundBloc, playgroundFsBloc, CONFIG.API_URL, () => editorUI.getContent());
 
     // 3. System Initialization
     initBrandingTitle();
+    initHotkeys();
 
     // Wake up Render Backend (Free Tier)
     fetch(`${CONFIG.API_URL}/health`).catch(() => {});
@@ -108,6 +139,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // there with no indication it isn't the user's actual project.
     globalEventBus.on('AUTH_LOGIN', ({ user, db }) => {
         fsBloc.loadProjectFromCloud(db, user);
+        playgroundFsBloc.loadProjectFromCloud(db, user);
+        learnBloc.loadProgressFromCloud(db, user);
+    });
+
+    // A test just passed (LearnBloc.runTests) -- push progress to the
+    // user's account if they're logged in. Silently does nothing otherwise,
+    // same as today's localStorage-only flow for anonymous use.
+    globalEventBus.on('LEARN_PROGRESS_UPDATED', () => {
+        const { user, db } = authBloc.state;
+        if (user && db) learnBloc.saveProgressToCloud(db, user);
     });
 
     authBloc.subscribe((state) => {
@@ -116,6 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const cloudSaveBtn = document.getElementById('cloudSaveBtn');
             if(cloudLoadBtn) cloudLoadBtn.onclick = () => fsBloc.loadProjectFromCloud(state.db, state.user);
             if(cloudSaveBtn) cloudSaveBtn.onclick = () => fsBloc.saveProjectToCloud(state.db, state.user, editorUI.getContent());
+
+            const playgroundCloudLoadBtn = document.getElementById('playgroundCloudLoadBtn');
+            const playgroundCloudSaveBtn = document.getElementById('playgroundCloudSaveBtn');
+            if(playgroundCloudLoadBtn) playgroundCloudLoadBtn.onclick = () => playgroundFsBloc.loadProjectFromCloud(state.db, state.user);
+            if(playgroundCloudSaveBtn) playgroundCloudSaveBtn.onclick = () => playgroundFsBloc.saveProjectToCloud(state.db, state.user, editorUI.getContent());
         }
     });
 

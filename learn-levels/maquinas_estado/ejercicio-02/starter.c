@@ -18,6 +18,9 @@ typedef void (*Action)(void);
 typedef struct { State next; Action act; } Cell;
 
 // TODO: define aqui on_ready, on_error y on_reset (void -> void)
+static void on_ready(void) { /* TODO: imprime "Sistema en linea" */ }
+static void on_error(void) { /* TODO: imprime "FALLO detectado" */ }
+static void on_reset(void) { /* TODO: imprime "Sistema reiniciado" */ }
 
 
 static const Cell TT[ST__N][EV__N] = {

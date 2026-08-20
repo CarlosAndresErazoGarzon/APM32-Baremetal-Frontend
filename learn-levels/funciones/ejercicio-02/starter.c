@@ -11,8 +11,10 @@
  * Promedio: 22.00
  */
 
-// TODO: float calcular_promedio(const int muestras[], int n)
-
+float calcular_promedio(const int muestras[], int n) {
+    // TODO: calcula y retorna la media aritmetica en punto flotante
+    return 0.0;
+}
 
 int main(void) {
     int buffer[5] = {20, 22, 19, 25, 24};

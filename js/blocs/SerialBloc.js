@@ -13,6 +13,14 @@ export class SerialBloc extends Bloc {
         super();
         this.serialReader = null;
         this.readLoopPromise = null;
+        // The promise from port.readable.pipeTo(decoder.writable) in
+        // _startReading -- pipeTo locks port.readable for as long as it's
+        // running, and cancelling serialReader (the reader on the piped-to
+        // stream) doesn't release that lock by itself. _stopReading() must
+        // await this too, or a second attempt to read the port right after
+        // disconnecting fails with "readable stream is not yet locked to a
+        // reader".
+        this.inputDone = null;
     }
 
     async connect(baudRate) {
@@ -40,16 +48,29 @@ export class SerialBloc extends Bloc {
 
     async disconnect() {
         if (this.state.port) {
-            if (this.serialReader) {
-                await this.serialReader.cancel();
-                this.serialReader = null;
-            }
-            if (this.readLoopPromise) {
-                await this.readLoopPromise;
-            }
+            await this._stopReading();
             await this.state.port.close();
             this.emit({ isConnected: false, port: null });
             globalEventBus.emit('SERIAL_DISCONNECTED');
+        }
+    }
+
+    // Tears down the read loop AND waits for pipeTo's lock on port.readable
+    // to actually release -- see the constructor's comment on inputDone for
+    // why a bare cancel-then-null-then-await-readLoopPromise sequence isn't
+    // enough on its own.
+    async _stopReading() {
+        if (this.serialReader) {
+            await this.serialReader.cancel().catch(() => {});
+            this.serialReader = null;
+        }
+        if (this.readLoopPromise) {
+            await this.readLoopPromise.catch(() => {});
+            this.readLoopPromise = null;
+        }
+        if (this.inputDone) {
+            await this.inputDone.catch(() => {});
+            this.inputDone = null;
         }
     }
 
@@ -72,14 +93,20 @@ export class SerialBloc extends Bloc {
 
     async _startReading(port) {
         const decoder = new TextDecoderStream();
-        // We don't await pipeTo here, it runs continuously
-        const inputDone = port.readable.pipeTo(decoder.writable);
+        // Stored (not just a local) -- _stopReading() awaits this so it
+        // knows pipeTo has actually released its lock on port.readable
+        // before disconnect() (or a fresh connect()) touches the port again.
+        this.inputDone = port.readable.pipeTo(decoder.writable);
         this.serialReader = decoder.readable.getReader();
+        // Captured locally: the loop's `finally` must release THIS reader
+        // even if _stopReading() has already nulled out this.serialReader
+        // by the time cancel() causes read() to reject.
+        const reader = this.serialReader;
 
         this.readLoopPromise = (async () => {
             try {
                 while (true) {
-                    const { value, done } = await this.serialReader.read();
+                    const { value, done } = await reader.read();
                     if (done) break;
                     if (value) {
                         globalEventBus.emit('SERIAL_DATA_RECEIVED', { data: value });
@@ -88,74 +115,12 @@ export class SerialBloc extends Bloc {
             } catch (error) {
                 // Ignore DOMException errors that occur during disconnect
             } finally {
-                this.serialReader.releaseLock();
+                reader.releaseLock();
             }
         })();
     }
 
-    async flashBinary(binBuffer) {
-        let port = this.state.port;
-        const wasConnected = this.state.isConnected;
-
-        if (!wasConnected) {
-            globalEventBus.emit('LOG', { message: "Connecting to DAPLink...", type: 'info' });
-            try {
-                port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 115200 });
-                this.emit({ isConnected: true, port });
-            } catch (e) {
-                globalEventBus.emit('LOG', { message: "Cannot open port for flashing: " + e.message, type: 'error' });
-                return;
-            }
-        } else {
-            // Must stop the serial reader before flashing
-            if (this.serialReader) {
-                await this.serialReader.cancel();
-                this.serialReader = null;
-                if (this.readLoopPromise) {
-                    await this.readLoopPromise;
-                }
-            }
-        }
-
-        try {
-            globalEventBus.emit('LOG', { message: "Initializing DAPLink...", type: 'warn' });
-            
-            // eslint-disable-next-line no-undef
-            const transport = new DAPjs.WebSerialTransport(port);
-            // eslint-disable-next-line no-undef
-            const daplink = new DAPjs.DAPLink(transport);
-
-            await daplink.connect();
-            globalEventBus.emit('LOG', { message: "Connected to DAPLink.", type: 'success' });
-            
-            const target = await daplink.getFlash();
-            globalEventBus.emit('LOG', { message: "Flashing binary...", type: 'warn' });
-            
-            const array = new Uint8Array(binBuffer);
-            
-            daplink.on(DAPjs.DAPLink.EVENT_PROGRESS, (progress) => {
-                globalEventBus.emit('FLASH_PROGRESS', { progress: Math.round(progress * 100) });
-            });
-
-            await target.flash(array);
-            globalEventBus.emit('LOG', { message: "Flash Complete!", type: 'success' });
-            
-            globalEventBus.emit('LOG', { message: "Resetting target...", type: 'info' });
-            await daplink.reset();
-            globalEventBus.emit('LOG', { message: "Target running.", type: 'success' });
-            
-            await daplink.disconnect();
-            
-        } catch (error) {
-            globalEventBus.emit('LOG', { message: "Flashing Error: " + error.message, type: 'error' });
-        } finally {
-            // Restart standard serial reading if we intend to stay connected
-            if (wasConnected && this.state.port) {
-                this._startReading(this.state.port);
-            } else if (!wasConnected && this.state.port) {
-                await this.disconnect();
-            }
-        }
-    }
+    // Flashing lives in DapBloc.js now -- it's a WebUSB connection to a
+    // completely different interface on the probe than this class's
+    // navigator.serial console connection. See DapBloc.js's header comment.
 }

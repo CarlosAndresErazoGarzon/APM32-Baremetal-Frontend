@@ -30,7 +30,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "operadores",
@@ -65,7 +70,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "control_flujo",
@@ -100,7 +110,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "bucles",
@@ -135,7 +150,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "arreglos",
@@ -170,7 +190,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "funciones",
@@ -205,7 +230,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "estructuras",
@@ -240,7 +270,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "archivos",
@@ -275,7 +310,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "basicos_c",
+            "title": "Basicos de C",
+            "order": 1
+        }
     },
     {
         "id": "bitwise_avanzado",
@@ -310,7 +350,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "c_avanzado",
+            "title": "C Avanzado",
+            "order": 3
+        }
     },
     {
         "id": "apuntadores",
@@ -345,7 +390,12 @@
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
             }
-        ]
+        ],
+        "superUnit": {
+            "id": "c_avanzado",
+            "title": "C Avanzado",
+            "order": 3
+        }
     },
     {
         "id": "maquinas_estado",
@@ -379,6 +429,120 @@
                 "title": "M44: Despachador Multi-Maquina",
                 "order": 4,
                 "starterFile": "ejercicio-04/starter.c"
+            }
+        ],
+        "superUnit": {
+            "id": "c_avanzado",
+            "title": "C Avanzado",
+            "order": 3
+        }
+    },
+    {
+        "id": "uso_gpio_salidas",
+        "title": "Unidad 12: GPIO - Configuracion y Salidas",
+        "order": 12,
+        "superUnit": {
+            "id": "uso_placa",
+            "title": "Uso de la Placa",
+            "order": 2
+        },
+        "prerequisites": [
+            "apuntadores"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M45: Reloj y Configuracion de Pines",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M46: Encendido y Apagado de LED",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M47: Patron de Parpadeo",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M48: Multiples LEDs - Mascara de Grupo",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "uso_gpio_entradas",
+        "title": "Unidad 13: GPIO - Entradas y Anti-Rebote",
+        "order": 13,
+        "superUnit": {
+            "id": "uso_placa",
+            "title": "Uso de la Placa",
+            "order": 2
+        },
+        "prerequisites": [
+            "uso_gpio_salidas"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M49: Configurar Entrada con Pull-Up",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M50: Lectura de Boton (Polling)",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
+            },
+            {
+                "id": "ejercicio-03",
+                "title": "M51: Anti-Rebote por Conteo de Estabilidad",
+                "order": 3,
+                "starterFile": "ejercicio-03/starter.c"
+            },
+            {
+                "id": "ejercicio-04",
+                "title": "M52: Toggle de LED por Boton",
+                "order": 4,
+                "starterFile": "ejercicio-04/starter.c"
+            }
+        ]
+    },
+    {
+        "id": "uso_capstone_fsm_gpio",
+        "title": "Unidad 14: Capstone - FSM + GPIO",
+        "order": 14,
+        "superUnit": {
+            "id": "uso_placa",
+            "title": "Uso de la Placa",
+            "order": 2
+        },
+        "prerequisites": [
+            "uso_gpio_entradas",
+            "maquinas_estado"
+        ],
+        "theoryFile": "theory.md",
+        "exercises": [
+            {
+                "id": "ejercicio-01",
+                "title": "M53: Tabla de Transicion sobre GPIO Real",
+                "order": 1,
+                "starterFile": "ejercicio-01/starter.c"
+            },
+            {
+                "id": "ejercicio-02",
+                "title": "M54: Despachador Multi-Evento con Debounce",
+                "order": 2,
+                "starterFile": "ejercicio-02/starter.c"
             }
         ]
     }

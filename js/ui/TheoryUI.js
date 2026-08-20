@@ -31,5 +31,7 @@ export class TheoryUI {
 
         // eslint-disable-next-line no-undef
         this.container.innerHTML = marked.parse(state.theoryMd);
+        this.container.style.backgroundColor = "var(--terminal-bg)";
+        this.container.style.color = "var(--text-main)";
     }
 }

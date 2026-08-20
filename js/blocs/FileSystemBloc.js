@@ -2,6 +2,24 @@ import { Bloc } from '../core/Bloc.js';
 import { globalEventBus } from '../core/EventBus.js';
 
 export class FileSystemBloc extends Bloc {
+    // Both params optional -- the existing IDE-mode call site (`new
+    // FileSystemBloc()`) is unaffected, getting the APM32 seed on the
+    // shared `project` cloud field exactly as before. Playground's
+    // instance passes its own plain-C seed and a sibling cloud field
+    // (`playgroundProject`) so the two projects don't collide on the
+    // same users/{uid} document -- same sibling-field pattern already
+    // used for `learnProgress`.
+    constructor(seedFiles = null, cloudField = 'project') {
+        super();
+        this.cloudField = cloudField;
+        if (seedFiles) {
+            const firstFile = Object.keys(seedFiles)[0] || null;
+            // Direct state overwrite, not emit() -- nothing has subscribed
+            // yet this early in construction, so there's nothing to notify.
+            this._state = { ...this._state, virtualFS: seedFiles, currentFile: firstFile };
+        }
+    }
+
     get initialState() {
         return {
             virtualFS: {
@@ -14,8 +32,21 @@ export class FileSystemBloc extends Bloc {
             currentFile: 'src/main.c',
             projectType: 'scratchpad',
             projectName: '',
-            projectId: null
+            projectId: null,
+            // Playground only: names (not content -- see setBinaryNames())
+            // of binaries ConsoleUI's manual terminal has compiled this
+            // session. Always [] for IDE's instance.
+            binaryNames: []
         };
+    }
+
+    // Playground's manual terminal (ConsoleUI.js) compiles binaries that
+    // deliberately never enter virtualFS -- their actual bytes stay in
+    // ConsoleUI's own session memory (never shown as text, never saved to
+    // cloud). This just records their NAMES so SidebarUI can show that they
+    // exist instead of a compiled program silently vanishing from view.
+    setBinaryNames(names) {
+        this.emit({ binaryNames: names || [] });
     }
 
     createFile(filename) {
@@ -126,6 +157,35 @@ export class FileSystemBloc extends Bloc {
         this.emit({ virtualFS: newFS });
     }
 
+    // Bulk variant of updateFileContent/createFile -- used by Playground's
+    // RUN round-trip (see app.js): a program that does fopen("x", "w")
+    // writes into the sandbox's job dir, and the backend reads that dir
+    // back after execution (learnRunner.js's runArbitrary) so whatever the
+    // program created/changed lands back in the file manager instead of
+    // being silently discarded with the rest of the job dir.
+    mergeFiles(filesMap) {
+        if (!filesMap || Object.keys(filesMap).length === 0) return;
+        const newFS = { ...this.state.virtualFS, ...filesMap };
+        this.emit({ virtualFS: newFS });
+    }
+
+    // Diffs `outputFiles` (what a Playground RUN/terminal exec sent back)
+    // against `submittedFiles` (what was sent to it) and merges in only
+    // what's new or changed -- unchanged source files would just be
+    // redundant no-op writes. Returns the changed filenames so the caller
+    // can log/report what happened. Shared by app.js's RUN button handler
+    // and ConsoleUI's manual terminal, so the diff logic lives in one place.
+    mergeChangedFiles(submittedFiles, outputFiles) {
+        if (!outputFiles) return [];
+        const changed = {};
+        for (const [name, content] of Object.entries(outputFiles)) {
+            if (submittedFiles[name] !== content) changed[name] = content;
+        }
+        const names = Object.keys(changed);
+        if (names.length > 0) this.mergeFiles(changed);
+        return names;
+    }
+
     selectFile(filename) {
         if (this.state.virtualFS[filename] !== undefined) {
             this.emit({ currentFile: filename });
@@ -137,8 +197,8 @@ export class FileSystemBloc extends Bloc {
         try {
             globalEventBus.emit('LOG', { message: "Loading project from cloud...", type: 'warn' });
             const doc = await db.collection("users").doc(user.uid).get();
-            if (doc.exists && doc.data().project) {
-                const loadedFS = doc.data().project;
+            if (doc.exists && doc.data()[this.cloudField]) {
+                const loadedFS = doc.data()[this.cloudField];
                 const firstFile = Object.keys(loadedFS)[0];
                 this.emit({
                     virtualFS: loadedFS,
@@ -164,15 +224,19 @@ export class FileSystemBloc extends Bloc {
             if (this.state.currentFile && currentEditorContent !== undefined) {
                 fsToSave[this.state.currentFile] = currentEditorContent;
             }
-            
+
             globalEventBus.emit('LOG', { message: "Saving project to cloud...", type: 'warn' });
+            // merge: true is load-bearing -- this document has sibling fields
+            // (`project`, `playgroundProject`, `learnProgress`) written by
+            // other blocs; a plain .set() here would wipe whichever of those
+            // this particular FileSystemBloc instance doesn't own.
             // eslint-disable-next-line no-undef
             await db.collection("users").doc(user.uid).set({
                 email: user.email,
                 // eslint-disable-next-line no-undef
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-                project: fsToSave
-            });
+                [this.cloudField]: fsToSave
+            }, { merge: true });
             this.emit({ projectType: 'cloud', projectName: user.email, projectId: null });
             globalEventBus.emit('LOG', { message: "Project saved successfully!", type: 'success' });
         } catch (error) {

@@ -1,20 +1,22 @@
 import { globalEventBus } from '../core/EventBus.js';
 
 export class EditorUI {
-    constructor(fsBloc, modeBloc, learnBloc) {
+    constructor(fsBloc, modeBloc, learnBloc, playgroundFsBloc = null) {
         this.fsBloc = fsBloc;
         this.modeBloc = modeBloc;
         this.learnBloc = learnBloc;
+        this.playgroundFsBloc = playgroundFsBloc;
         this.editor = null;
         this.editorContainer = document.getElementById('editor');
         this.themeToggleBtn = document.getElementById('themeToggle');
         this.themeIcon = document.getElementById('themeIcon');
 
         // Internal state trackers to avoid infinite loops on update -- one per
-        // mode, since IDE and Learn each track "what's currently loaded"
-        // independently of each other.
+        // mode, since IDE/Learn/Playground each track "what's currently
+        // loaded" independently of each other.
         this.lastRenderedFile = null;
         this.lastRenderedLevelId = null;
+        this.lastRenderedPlaygroundFile = null;
 
         // The page's actual theming is driven by a single `light-theme` class on
         // <body> (see the CSS custom properties in index.html: --sidebar-bg,
@@ -30,65 +32,65 @@ export class EditorUI {
     initEditor() {
         if (!this.editorContainer || typeof monaco === 'undefined') return;
 
-        // Gold-luxury palette (restored), dark. Monaco can't consume CSS
-        // variables directly, so these are index.html's :root tokens
-        // copied in by hand -- keep them in sync if that palette changes.
+        // Sage/olive dark palette. Monaco can't consume CSS variables
+        // directly, so these are index.html's :root tokens copied in by
+        // hand -- keep them in sync if that palette changes.
         monaco.editor.defineTheme('mhrd-dark', {
             base: 'vs-dark',
             inherit: true,
             rules: [
-                { background: '1c1c1e', foreground: 'c9c5b8' },
-                { token: 'comment', foreground: '8a877d', fontStyle: 'italic' },
+                { background: '262A2B', foreground: 'C9C8B6' },
+                { token: 'comment', foreground: '8E948D', fontStyle: 'italic' },
                 { token: 'keyword', foreground: 'ff7b72', fontStyle: 'bold' },
                 { token: 'string', foreground: 'a5d6ff' },
                 { token: 'number', foreground: '79c0ff' },
-                { token: 'type', foreground: 'c9c5b8' }
+                { token: 'type', foreground: '7D9B8B', fontStyle: 'bold' },
+                { token: 'identifier', foreground: 'E2E0CF' },
+                { token: 'delimiter', foreground: 'C9C8B6' }
             ],
             colors: {
-                'editor.background': '#1c1c1e',
-                'editor.foreground': '#c9c5b8',
-                'editor.lineHighlightBackground': '#333335',
-                'editorLineNumber.foreground': '#8a877d',
-                'editorLineNumber.activeForeground': '#c9c5b8',
-                'editorGutter.background': '#1c1c1e',
-                'editorIndentGuide.background': '#333335',
-                'editorIndentGuide.activeBackground': '#4a4a4d',
-                'editorCursor.foreground': '#ffdb89',
-                'editor.selectionBackground': '#4a4a4d',
-                'editor.inactiveSelectionBackground': '#333335',
-                'editor.selectionHighlightBackground': '#333335',
-                'editorWhitespace.foreground': '#4a4a4d'
+                'editor.background': '#262A2B',
+                'editor.foreground': '#C9C8B6',
+                'editor.lineHighlightBackground': '#2F3B36',
+                'editorLineNumber.foreground': '#8E948D',
+                'editorLineNumber.activeForeground': '#E2E0CF',
+                'editorGutter.background': '#262A2B',
+                'editorIndentGuide.background': '#2F3B36',
+                'editorIndentGuide.activeBackground': '#353B3D',
+                'editorCursor.foreground': '#7D9B8B',
+                'editor.selectionBackground': '#353B3D',
+                'editor.inactiveSelectionBackground': '#2F3B36',
+                'editor.selectionHighlightBackground': '#2F3B36',
+                'editorWhitespace.foreground': '#353B3D'
             }
         });
 
-        // Same palette, light -- same reasoning as dark. Syntax colors
-        // (keyword/string/number) intentionally stay off the gold/gray
-        // sheet, matching GitHub's real code-view highlighting.
+        // Same structure, light -- matching the warm gold/sand palette tokens.
         monaco.editor.defineTheme('mhrd-light', {
             base: 'vs',
             inherit: true,
             rules: [
-                { background: 'faf6ec', foreground: '2c2c2e' },
-                { token: 'comment', foreground: '6b6a5f', fontStyle: 'italic' },
-                { token: 'keyword', foreground: 'cf222e', fontStyle: 'bold' },
-                { token: 'string', foreground: '0a3069' },
-                { token: 'number', foreground: '0550ae' },
-                { token: 'type', foreground: '2c2c2e' }
+                { background: 'EDE4B7', foreground: '31302E' },
+                { token: 'comment', foreground: '666157', fontStyle: 'italic' },
+                { token: 'keyword', foreground: '8B2626', fontStyle: 'bold' },
+                { token: 'string', foreground: '40584B' },
+                { token: 'number', foreground: '7A4D1D' },
+                { token: 'type', foreground: '232220', fontStyle: 'bold' }
             ],
             colors: {
-                'editor.background': '#faf6ec',
-                'editor.foreground': '#2c2c2e',
-                'editor.lineHighlightBackground': '#f2ecd9',
-                'editorLineNumber.foreground': '#b8923f',
-                'editorLineNumber.activeForeground': '#2c2c2e',
-                'editorGutter.background': '#faf6ec',
-                'editorIndentGuide.background': '#f2ecd9',
-                'editorIndentGuide.activeBackground': '#ddd0a8',
-                'editorCursor.foreground': '#8a6318',
-                'editor.selectionBackground': '#f2ecd9',
-                'editor.inactiveSelectionBackground': '#f2ecd9',
-                'editor.selectionHighlightBackground': '#f2ecd9',
-                'editorWhitespace.foreground': '#ddd0a8'
+                'editor.background': '#EDE4B7',
+                'editor.foreground': '#31302E',
+                'editor.lineHighlightBackground': '#E5DBAA',
+                'editorLineNumber.foreground': '#8A8375',
+                'editorLineNumber.activeForeground': '#232220',
+                'editorGutter.background': '#EDE4B7',
+                'editorIndentGuide.background': '#E5DBAA',
+                'editorIndentGuide.activeBackground': '#C8BE93',
+                'editorCursor.foreground': '#31302E',
+                'editor.selectionBackground': '#F5EFCF',
+                'editor.inactiveSelectionBackground': '#E5DBAA',
+                'editor.selectionHighlightBackground': '#E5DBAA',
+                'editorWhitespace.foreground': '#C8BE93'
             }
         });
 
@@ -124,10 +126,14 @@ export class EditorUI {
         // Subscribe to FileSystem changes to update editor content
         this.fsBloc.subscribe(this.render.bind(this));
         this.learnBloc.subscribe(this.renderLearn.bind(this));
+        if (this.playgroundFsBloc) {
+            this.playgroundFsBloc.subscribe(this.renderPlayground.bind(this));
+        }
         // On a mode switch, force whichever side is becoming active to reload
         // its content into the editor (the editor currently holds the OTHER
-        // mode's text) and mark the other side's "last shown" as stale so it
-        // doesn't try to write that leftover text back into its own state.
+        // mode's text) and mark the other sides' "last shown" as stale so
+        // they don't try to write that leftover text back into their own
+        // state.
         this.modeBloc.subscribe(this.onModeChange.bind(this));
     }
 
@@ -160,12 +166,19 @@ export class EditorUI {
     onModeChange(modeState) {
         if (!this.editor) return;
 
+        // Force a fresh reload on whichever side is becoming active (the
+        // editor currently holds one of the OTHER two modes' text) and mark
+        // the other two's "last shown" as stale so they don't mistake this
+        // leftover text for their own and write it back into their state.
         if (modeState.mode === 'ide') {
-            this.lastRenderedFile = null; // force a fresh reload, editor currently holds Learn-mode code
+            this.lastRenderedFile = null;
             this.render(this.fsBloc.state);
-        } else {
-            this.lastRenderedLevelId = null; // force a fresh reload, editor currently holds IDE code
+        } else if (modeState.mode === 'learn') {
+            this.lastRenderedLevelId = null;
             this.renderLearn(this.learnBloc.state);
+        } else if (modeState.mode === 'playground' && this.playgroundFsBloc) {
+            this.lastRenderedPlaygroundFile = null;
+            this.renderPlayground(this.playgroundFsBloc.state);
         }
     }
 
@@ -177,6 +190,14 @@ export class EditorUI {
 
         try {
             const fileChanged = this.lastRenderedFile !== state.currentFile;
+            // Same filename, but the content behind it changed underneath
+            // us (loadProjectFromCloud() landing on a project whose first
+            // file happens to share the CURRENTLY DISPLAYED file's name,
+            // e.g. both "main.c" -- fileChanged alone would stay false and
+            // silently leave the stale seed content on screen). Mirrors
+            // renderLearn()'s own codeChanged check below.
+            const contentChanged = !fileChanged && state.currentFile &&
+                this.editor.getValue() !== (state.virtualFS[state.currentFile] || '');
 
             // Save current editor content to FS before switching files
             // IMPORTANT: We write directly to state.virtualFS WITHOUT calling emit()
@@ -186,7 +207,7 @@ export class EditorUI {
             }
 
             // Load the new file content into the editor
-            if (fileChanged && state.currentFile) {
+            if ((fileChanged || contentChanged) && state.currentFile) {
                 const content = state.virtualFS[state.currentFile] || '';
                 this.editor.setValue(content);
 
@@ -200,6 +221,47 @@ export class EditorUI {
             }
         } finally {
             this._isRendering = false;
+        }
+    }
+
+    // Mirrors render() exactly (same virtualFS/currentFile state shape,
+    // since PlaygroundBloc's FileSystemBloc instance is the same class) --
+    // kept as its own method rather than parameterizing render() itself, to
+    // match the existing render()/renderLearn() pair instead of inventing a
+    // third pattern.
+    renderPlayground(state) {
+        if (!this.editor || this.modeBloc.state.mode !== 'playground') return;
+        if (this._isRenderingPlayground) return;
+        this._isRenderingPlayground = true;
+
+        try {
+            const fileChanged = this.lastRenderedPlaygroundFile !== state.currentFile;
+            // Same reasoning as render()'s own contentChanged -- a
+            // loadProjectFromCloud() landing on a project whose first file
+            // is also named "main.c" (Playground's own seed default, so
+            // this is the COMMON case here, not an edge case) would
+            // otherwise leave the stale seed content on screen since the
+            // filename itself never changes.
+            const contentChanged = !fileChanged && state.currentFile &&
+                this.editor.getValue() !== (state.virtualFS[state.currentFile] || '');
+
+            if (fileChanged && this.lastRenderedPlaygroundFile && state.virtualFS[this.lastRenderedPlaygroundFile] !== undefined) {
+                state.virtualFS[this.lastRenderedPlaygroundFile] = this.editor.getValue();
+            }
+
+            if ((fileChanged || contentChanged) && state.currentFile) {
+                const content = state.virtualFS[state.currentFile] || '';
+                this.editor.setValue(content);
+
+                const isHeader = state.currentFile.endsWith('.h');
+                monaco.editor.setModelLanguage(this.editor.getModel(), isHeader ? 'cpp' : 'c');
+
+                this.applyMarkers([]);
+
+                this.lastRenderedPlaygroundFile = state.currentFile;
+            }
+        } finally {
+            this._isRenderingPlayground = false;
         }
     }
 

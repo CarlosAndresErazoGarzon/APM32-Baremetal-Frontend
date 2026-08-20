@@ -12,8 +12,13 @@
  * Voltaje Calibrado: 3.30 V
  */
 
-// TODO: Implementa swap y calibrar
+void swap(int *a, int *b) {
+    // TODO: intercambia los valores apuntados por a y b
+}
 
+void calibrar(float *lectura, float offset) {
+    // TODO: suma offset al valor apuntado por lectura
+}
 
 int main(void) {
     int canal_a = 1, canal_b = 2;

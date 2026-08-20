@@ -25,8 +25,14 @@ export class CodeTheoryTabsUI {
         const inLearnMode = this.modeBloc.state.mode === 'learn';
         const showTheory = inLearnMode && this.learnBloc.state.currentView === 'theory';
 
-        if (this.editorContainer) this.editorContainer.classList.toggle('hidden', showTheory);
-        if (this.theoryTabPanel) this.theoryTabPanel.classList.toggle('hidden', !showTheory);
+        if (this.editorContainer) {
+            this.editorContainer.classList.toggle('hidden', showTheory);
+            this.editorContainer.style.backgroundColor = "var(--terminal-bg)";
+        }
+        if (this.theoryTabPanel) {
+            this.theoryTabPanel.classList.toggle('hidden', !showTheory);
+            this.theoryTabPanel.style.backgroundColor = "var(--terminal-bg)";
+        }
 
         // Monaco doesn't always notice its container was hidden (display:none)
         // and came back -- nudge it to recompute layout when the editor

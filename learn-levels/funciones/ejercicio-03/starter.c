@@ -12,8 +12,10 @@
  * Evento detectado: pulso #3
  */
 
-// TODO: int registrar_pulso(void)
-
+int registrar_pulso(void) {
+    // TODO: usa una variable static int contador = 0; increméntala y retórnala
+    return 0;
+}
 
 int main(void) {
     for (int i = 0; i < 3; i++) {

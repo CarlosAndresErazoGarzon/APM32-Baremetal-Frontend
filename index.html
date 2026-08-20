@@ -6,55 +6,63 @@
     <title>APM32 STATION</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;500;600;700;800;900&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/dapjs/dist/dap.umd.js"></script>
+    <!-- Vendored, not CDN -- see vendor/dapjs/README.md for why. -->
+    <script src="vendor/dapjs/dap.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
     <style>
         :root {
-            /* Gold-luxury palette (restored -- this was the palette in
-               place before the two-color #C9C8B6/#262A2B experiment).
-               --accent-text is the gold used as a standalone highlight
-               color (hover states, active tabs, selected-row labels) --
-               it sits on the page's normal background, so it just needs
-               to read clearly against dark/light, nothing to invert.
-               --active-bg/--active-text are a SEPARATE pair, used only by
-               the handful of solid "pill" fills (mode toggle, recovery
-               modal's confirm button, tree-row selection): a solid gold
-               fill needs a genuinely dark (not gold-on-gold) text color,
-               so --active-text intentionally does NOT equal --accent-text
-               here, even though both happen to derive from the same gold. */
-            --terminal-bg: #1c1c1e;
-            --sidebar-bg: #333335;
-            --border-color: #4a4a4d;
-            --header-color: #c9c5b8;
-            --text-main: #c9c5b8;
-            --text-muted: #8a877d;
-            --log-bg: #1a1a1b;
+            /* Sage/olive dark palette (2026-08). Semantic token names given
+               for this palette (--bg-main-surface, --text-title-primary,
+               --btn-primary-bg, etc.) are mapped onto this file's EXISTING
+               CSS var names below -- no new custom properties introduced,
+               everything downstream already reads these. */
+            --terminal-bg: #262A2B;
+            --sidebar-bg: #1E2223;
+            --border-color: #353B3D;
+            --header-color: #E2E0CF;
+            --text-main: #C9C8B6;
+            --text-muted: #8E948D;
+            --log-bg: #1B1E1F;
 
-            --sidebar-text: #c9c5b8;
-            --header-text: #c9c5b8;
-            --accent-text: #ffdb89;      /* gold, standalone highlight text */
-            --active-bg: #ffdb89;        /* solid gold fill... */
-            --active-text: #1c1c1e;      /* ...dark text on top of it */
-            --active-border: #ffdb89;
+            --sidebar-text: #8E948D;
+            --header-text: #8E948D;
+            --accent-text: #7D9B8B;
+            --active-bg: #2F3B36;
+            --active-text: #7D9B8B;
+            --active-border: #7D9B8B;
 
-            --btn-blue-bg: #333335;
-            --btn-blue-text: #c9c5b8;
-            --btn-green-bg: #1b2e20;
-            --btn-green-text: #4ac26b;
-            --btn-red-bg: #7f1d1d;
-            --btn-red-text: #f85149;
+            --btn-blue-bg: #2F3537;
+            --btn-blue-text: #A5ACA4;
+            --btn-green-bg: #3E5A4E;
+            --btn-green-text: #E2E0CF;
+            --btn-red-bg: #450a0a;
+            --btn-red-text: #f87171;
 
-            --track-bg: rgba(201, 197, 184, 0.06);
-            --track-border: rgba(201, 197, 184, 0.16);
+            --success-text: #10b981;
+            --danger-text: #f87171;
+
+            --track-bg: rgba(209, 209, 224, 0.06);
+            --track-border: rgba(209, 209, 224, 0.16);
+        }
+
+        /* html only needs the background -- putting font-size (or any of
+           body's other typography rules) on html too changes the root
+           font-size Tailwind's rem-based utilities (h-8, p-4, ...) scale
+           against, silently shrinking every one of them ~12.5% app-wide
+           (h-8 -- meant to be 32px -- was actually rendering at 28px).
+           Confirmed via a real regression: terminal-pane-layout.test.js's
+           collapsed-height assertion started failing from exactly this. */
+        html {
+            background-color: var(--terminal-bg) !important;
         }
 
         body {
-            background-color: var(--terminal-bg);
+            background-color: var(--terminal-bg) !important;
             font-family: 'Inconsolata', monospace;
             font-size: 14px;
             color: var(--text-main);
@@ -64,6 +72,36 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: optimizeLegibility;
+        }
+
+        #workspace,
+        #mainArea,
+        #editorContainer,
+        #theoryTabPanel,
+        #theoryContent,
+        .md-content {
+            background-color: var(--terminal-bg) !important;
+            background: var(--terminal-bg) !important;
+            color: var(--text-main) !important;
+        }
+
+        nav,
+        #sidebar,
+        #sidebar > div,
+        #terminalPane,
+        #terminalHeader,
+        #telemetryColumn {
+            background-color: var(--sidebar-bg) !important;
+        }
+
+        #resultsOutput,
+        #serialOutput,
+        #consolePanel,
+        #consoleOutput,
+        .log-box,
+        #logBox {
+            background-color: var(--log-bg) !important;
+            color: var(--text-main);
         }
         
         .scanlines { display: none; }
@@ -115,11 +153,6 @@
             position: relative;
         }
 
-        /* Tabs -- plain text + underline, no bordered box. MHRD's actual
-           tab bars ("Specification / Design \") are just text separated by
-           slashes with the active one highlighted; a per-tab bordered
-           button is one more surface competing for attention than the
-           reference has. */
         .ascii-tab {
             font-family: 'Inconsolata', monospace;
             font-size: 12px;
@@ -134,10 +167,6 @@
             color: var(--sidebar-text);
             transition: color 0.15s ease, border-color 0.15s ease;
         }
-        /* --active-bg/--active-text are the solid-fill pair (pressed
-           toggle, selected tree row) -- wrong here, a plain underline tab
-           has no fill to put dark-on-gold text on. Tabs use --accent-text
-           (the gold itself) plus the underline as the "selected" signal. */
         .ascii-tab:hover {
             color: var(--accent-text);
         }
@@ -148,16 +177,44 @@
             font-weight: 700;
         }
 
+        /* HotkeysUI.js sets a data-hotkey="R" attribute (not a child
+           element) on every hotkey-bound button -- this ::after renders it
+           as a small trailing badge. An attribute, not a DOM child, on
+           purpose: several of these buttons have their OWN owning UI class
+           that reassigns .innerHTML reactively (spinner/label swaps while
+           running) -- an appended child would just get wiped out the next
+           time that fires, an attribute survives it untouched. Hidden by
+           default (that's the "show/hide" toggle), shown by adding
+           .hotkeys-visible to <body>. */
+        [data-hotkey]::after {
+            content: attr(data-hotkey);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            margin-left: 6px;
+            padding: 0 4px;
+            min-width: 14px;
+            height: 14px;
+            font-size: 8px;
+            font-family: 'Inconsolata', monospace;
+            font-weight: 700;
+            line-height: 14px;
+            border: 1px solid currentColor;
+            border-radius: 2px;
+            opacity: 0.7;
+            vertical-align: middle;
+        }
+        body.hotkeys-visible [data-hotkey]::after {
+            display: inline-flex;
+        }
+
         /* Customize scrollbars */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: var(--terminal-bg); }
         ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 0; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-    </style>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        /* ... existing styles ... */
+
         .terminal-bg { background-color: var(--terminal-bg); border-top: 2px solid var(--border-color); }
 
         /* Modal for Docs and Learn-mode Theory.
@@ -189,9 +246,9 @@
         }
         .md-content h1 {
             font-family: 'Inconsolata', 'Menlo', 'Courier New', monospace;
-            color: var(--text-main);
+            color: var(--header-color);
             font-size: 1.35rem;
-            font-weight: 500;
+            font-weight: 700;
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 0.6rem;
             margin-top: 1.25rem;
@@ -200,18 +257,18 @@
         }
         .md-content h2 {
             font-family: 'Inconsolata', 'Menlo', 'Courier New', monospace;
-            color: var(--text-main);
+            color: var(--header-color);
             font-size: 1.18rem;
-            font-weight: 500;
+            font-weight: 700;
             margin-top: 1.75rem;
             margin-bottom: 0.75rem;
             letter-spacing: 0.01em;
         }
         .md-content h3 {
             font-family: 'Inconsolata', 'Menlo', 'Courier New', monospace;
-            color: var(--text-main);
+            color: var(--header-color);
             font-size: 1.05rem;
-            font-weight: 500;
+            font-weight: 600;
             margin-top: 1.35rem;
             margin-bottom: 0.5rem;
             letter-spacing: 0.01em;
@@ -222,7 +279,7 @@
         .md-content ul { list-style: disc; }
         .md-content ol { list-style: decimal; }
         .md-content li { margin-bottom: 0.5rem; }
-        .md-content strong { color: var(--text-main); font-weight: 700; }
+        .md-content strong { color: var(--header-color); font-weight: 700; }
 
         .md-content table {
             width: 100%;
@@ -238,7 +295,7 @@
         }
         .md-content th {
             background: var(--sidebar-bg);
-            color: var(--text-main);
+            color: var(--header-color);
             font-weight: 600;
             font-size: 12.5px;
             text-transform: uppercase;
@@ -251,7 +308,7 @@
 
         .md-content code {
             background: var(--sidebar-bg);
-            color: var(--text-main);
+            color: var(--accent-text);
             padding: 2px 6px;
             border-radius: 3px;
             font-family: 'Inconsolata', 'Menlo', 'Courier New', monospace;
@@ -260,7 +317,7 @@
             border: 1px solid var(--border-color);
         }
         .md-content pre {
-            background: var(--terminal-bg);
+            background: var(--log-bg);
             padding: 1.25rem;
             border-radius: 4px;
             overflow-x: auto;
@@ -277,14 +334,14 @@
             font-family: 'Inconsolata', monospace;
         }
         .md-content blockquote {
-            border-left: 3px solid var(--text-muted);
+            border-left: 3px solid var(--border-color);
             padding-left: 1rem;
             margin: 1.25rem 0;
             font-style: italic;
             color: var(--text-muted);
         }
 
-        #ideModeBtn.active, #learnModeBtn.active {
+        #ideModeBtn.active, #learnModeBtn.active, #playgroundModeBtn.active {
             background-color: var(--active-bg) !important;
             color: var(--active-text) !important;
             border-color: var(--active-bg) !important;
@@ -295,88 +352,84 @@
            underline-tab role and was the only thing ever using it. */
 
         /* =========================================================
-           LIGHT THEME - PAPER TERMINAL (HIGH CONTRAST & ZERO FATIGUE)
+           LIGHT THEME - GOLD / SAND PALETTE (HIGH CONTRAST & ZERO FATIGUE)
            ========================================================= */
         body.light-theme {
-            /* Same gold-luxury pair, light side: paper background, a
-               darker/denser gold (better contrast on a light ground than
-               the dark theme's pale gold would give). */
-            --terminal-bg: #faf6ec;
-            --sidebar-bg: #f2ecd9;
-            --border-color: #ddd0a8;
-            --header-color: #2c2c2e;
-            --text-main: #2c2c2e;
-            --text-muted: #6b6a5f;
-            --log-bg: #f2ecd9;
+            /* Warm Gold/Sand light palette (2026-08) -- same existing-var
+               mapping convention as :root's dark palette above (semantic
+               names like --btn-primary-bg map onto --btn-green-bg, etc.;
+               no new custom properties introduced). */
+            --terminal-bg: #EDE4B7;
+            --sidebar-bg: #E2D9A7;
+            --border-color: #C8BE93;
+            --header-color: #232220;
+            --text-main: #31302E;
+            --text-muted: #666157;
+            --log-bg: #E5DBAA;
 
-            --sidebar-text: #2c2c2e;
-            --header-text: #2c2c2e;
-            --accent-text: #8a6318;      /* dark gold, standalone highlight text */
-            --active-bg: #b8923f;        /* solid gold fill... */
-            --active-text: #faf6ec;      /* ...paper-light text on top of it */
-            --active-border: #b8923f;
+            --sidebar-text: #666157;
+            --header-text: #232220;
+            --accent-text: #31302E;
+            --active-bg: #F5EFCF;
+            --active-text: #31302E;
+            --active-border: #31302E;
 
-            --btn-blue-bg: #f2ecd9;
-            --btn-blue-text: #2c2c2e;
-            --btn-green-bg: #fdf0d0;
-            --btn-green-text: #116329;
-            --btn-red-bg: #ffe0dc;
-            --btn-red-text: #cf222e;
+            --btn-blue-bg: #D8CEA0;
+            --btn-blue-text: #31302E;
+            --btn-green-bg: #40584B;
+            --btn-green-text: #EDE4B7;
+            --btn-red-bg: #8B2626;
+            --btn-red-text: #FFFFFF;
 
-            --track-bg: rgba(44, 44, 46, 0.05);
-            --track-border: rgba(44, 44, 46, 0.14);
+            --success-text: #55684B;
+            --danger-text: #B91C1C;
+
+            --track-bg: rgba(49, 48, 46, 0.07);
+            --track-border: rgba(49, 48, 46, 0.16);
         }
 
 
         body.light-theme .ascii-tab {
-            background: var(--sidebar-bg);
-            color: var(--text-muted);
-            border-color: var(--border-color);
+            background: transparent;
+            color: var(--sidebar-text);
+            border-bottom: 2px solid transparent;
         }
         body.light-theme .ascii-tab:hover {
             color: var(--accent-text);
-            border-color: var(--accent-text);
-            background: var(--sidebar-bg);
+            border-bottom-color: var(--accent-text);
+            background: transparent;
         }
         body.light-theme .ascii-tab.active {
-            background: var(--sidebar-bg) !important;
+            background: transparent !important;
             color: var(--accent-text) !important;
-            border-color: var(--accent-text) !important;
+            border-bottom-color: var(--accent-text) !important;
             font-weight: 700;
         }
 
         body.light-theme .neon-btn {
-            background: var(--sidebar-bg);
-            color: var(--text-main);
+            background: var(--btn-blue-bg);
+            color: var(--btn-blue-text);
             border-color: var(--border-color);
         }
         body.light-theme .neon-btn:hover:not(:disabled) {
-            background: var(--sidebar-bg);
-            color: var(--text-main);
-            border-color: var(--text-main);
-        }
-
-        body.light-theme .log-box {
-            background-color: var(--sidebar-bg);
+            background: var(--active-bg);
             color: var(--text-main);
             border-color: var(--border-color);
         }
 
-        /* No light-theme override needed here anymore -- the base
-           #ideModeBtn.active/#learnModeBtn.active rule now reads
-           var(--active-bg)/var(--active-text), which already resolve
-           correctly per theme on their own. */
+        body.light-theme .log-box {
+            background-color: var(--log-bg);
+            color: var(--text-main);
+            border-color: var(--border-color);
+        }
 
-        /* Light Theme MD-Content -- only pre/blockquote differ from what
-           .md-content's own var()-based rules already resolve to
-           under body.light-theme; every other sub-rule here was a
-           byte-identical duplicate and has been removed */
+        /* Light Theme MD-Content */
         body.light-theme .md-content pre {
-            background: var(--sidebar-bg) !important;
+            background: var(--log-bg) !important;
             border-color: var(--border-color) !important;
         }
         body.light-theme .md-content blockquote {
-            border-left-color: var(--text-main);
+            border-left-color: var(--text-muted);
             color: var(--text-muted);
         }
 
@@ -387,7 +440,7 @@
             border-color: var(--border-color) !important;
         }
         body.light-theme #recoveryModal .recovery-panel-alt {
-            background: var(--sidebar-bg) !important;
+            background: var(--terminal-bg) !important;
             border-color: var(--border-color) !important;
         }
 
@@ -395,45 +448,46 @@
 
         /* Light Theme Component Overrides */
         body.light-theme nav {
-            background-color: var(--terminal-bg) !important;
-            border-color: var(--border-color) !important;
-        }
-        body.light-theme nav .nav-toggle-group {
             background-color: var(--sidebar-bg) !important;
             border-color: var(--border-color) !important;
         }
-        body.light-theme #exampleSelector {
+        body.light-theme nav .nav-toggle-group {
             background-color: var(--terminal-bg) !important;
+            border-color: var(--border-color) !important;
+        }
+        body.light-theme #exampleSelector {
+            background-color: var(--log-bg) !important;
             color: var(--text-main) !important;
             border-color: var(--border-color) !important;
         }
         body.light-theme #connectBtn {
-            background-color: var(--active-bg) !important;
-            color: var(--active-text) !important;
-            border-color: var(--active-bg) !important;
+            background-color: var(--btn-blue-bg) !important;
+            color: var(--btn-blue-text) !important;
+            border-color: var(--border-color) !important;
         }
         body.light-theme #connectBtn:hover {
             background-color: var(--active-bg) !important;
         }
         body.light-theme #flashBtn {
             background-color: var(--btn-blue-bg) !important;
-            color: var(--text-muted) !important;
+            color: var(--btn-blue-text) !important;
             border-color: var(--border-color) !important;
         }
 
         body.light-theme #runTestsBtn {
             background-color: var(--btn-green-bg) !important;
-            color: var(--text-main) !important;
-            border-color: var(--btn-green-text) !important;
+            color: var(--btn-green-text) !important;
+            border-color: var(--btn-green-bg) !important;
         }
         body.light-theme #runTestsBtn:hover {
             background-color: var(--btn-green-bg) !important;
             color: var(--btn-green-text) !important;
-            border-color: var(--btn-green-text) !important;
+            border-color: var(--border-color) !important;
+            opacity: 0.9;
         }
 
         body.light-theme #sidebar {
-            background-color: var(--terminal-bg) !important;
+            background-color: var(--sidebar-bg) !important;
             border-color: var(--border-color) !important;
         }
         body.light-theme #sidebar > div:first-child {
@@ -444,18 +498,33 @@
             background-color: var(--sidebar-bg) !important;
             border-color: var(--border-color) !important;
         }
-        body.light-theme #downloadZipBtn {
+        body.light-theme #downloadZipBtn,
+        body.light-theme #downloadBtn {
             background-color: var(--btn-blue-bg) !important;
             color: var(--btn-blue-text) !important;
             border-color: var(--border-color) !important;
         }
-        body.light-theme #downloadZipBtn:hover {
-            background-color: var(--btn-blue-bg) !important;
+        body.light-theme #downloadZipBtn:hover,
+        body.light-theme #downloadBtn:hover {
+            background-color: var(--active-bg) !important;
             color: var(--btn-blue-text) !important;
         }
         body.light-theme #terminalPane {
-            background-color: var(--terminal-bg) !important;
+            background-color: var(--sidebar-bg) !important;
             border-color: var(--border-color) !important;
+        }
+        body.light-theme #terminalHeader {
+            background-color: var(--sidebar-bg) !important;
+        }
+        body.light-theme #consolePanel {
+            background-color: var(--log-bg) !important;
+        }
+        body.light-theme #consoleOutput {
+            background-color: var(--log-bg) !important;
+            color: var(--text-main) !important;
+        }
+        body.light-theme #consoleCommandInput {
+            color: var(--text-main) !important;
         }
     </style>
 </head>
@@ -470,17 +539,32 @@
                 <button id="mobileMenuBtn" class="p-2 text-[var(--header-color)] hover:text-[var(--accent-text)] transition-colors" title="Toggle File Tree">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
                 </button>
-                <div id="projectTitle" class="retro-header text-[6px] leading-[1] lg:text-[7px] whitespace-pre font-mono overflow-hidden select-none">
+                <!-- Clips whichever random ASCII-art font (BrandingUI.js)
+                     got picked to a fixed box. All three limits measured
+                     directly, not guessed: fonts run 86-1040px wide (wide
+                     enough to push the mode buttons off-screen at ordinary
+                     desktop widths, not just mobile -- hence max-w on
+                     BOTH tiers) and 1-11 lines tall (uncapped, <nav>
+                     itself jumped 48-80px tall depending on which loaded).
+                     text-[8px], up from 6px: that was too small to render
+                     crisply at some real browser zoom levels. -->
+                <div id="projectTitle" class="retro-header text-[8px] leading-[1] lg:text-[9px] whitespace-pre font-mono overflow-hidden select-none max-w-[120px] lg:max-w-[420px] max-h-[40px] lg:max-h-[48px] flex-shrink-0">
                     <!-- Dynamic ASCII Art -->
                 </div>
                 <div class="nav-toggle-group flex items-center gap-1 ml-3 border border-[var(--border-color)] bg-[var(--terminal-bg)] p-0.5 flex-shrink-0">
                     <button id="ideModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">IDE</button>
                     <button id="learnModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">LEARN</button>
+                    <button id="playgroundModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">PLAYGROUND</button>
                 </div>
             </div>
         </div>
 
-        <div class="flex items-center gap-2 w-full lg:w-auto overflow-x-auto no-scrollbar pb-1 lg:pb-0">
+        <!-- pt-2/border-t only below `lg:`: browser zoom shrinks the
+             effective CSS viewport enough to trip this breakpoint on an
+             ordinary desktop monitor (confirmed by a user report), and
+             without the border this row read as a stray floating button
+             rather than a second toolbar row. -->
+        <div class="flex items-center gap-2 w-full lg:w-auto overflow-x-auto no-scrollbar pb-1 lg:pb-0 pt-2 border-t border-[var(--border-color)] lg:pt-0 lg:border-t-0">
             <button id="authBtn" class="neon-btn flex-shrink-0 px-3 lg:px-4 py-1.5 lg:py-2 rounded-none text-[10px] font-bold flex items-center gap-2" style="background-color: var(--btn-blue-bg); color: var(--btn-blue-text); border-color: var(--border-color); position: relative; z-index: 70;">
                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
                 LOGIN
@@ -514,11 +598,18 @@
                     RUN TESTS
                 </button>
             </div>
+
         </div>
     </nav>
 
     <!-- Workspace -->
-    <div class="flex-grow flex flex-col lg:flex-row gap-0 min-h-0 bg-transparent relative overflow-hidden">
+    <div id="workspace" class="flex-grow flex flex-col lg:flex-row gap-0 min-h-0 relative overflow-hidden" style="background-color: var(--terminal-bg);">
+
+        <!-- Mobile-only backdrop behind the drawer -- SidebarUI.js toggles this
+             on/off in step with the drawer and taps here close it (standard
+             mobile-drawer pattern). lg:hidden since the sidebar is inline, not
+             an overlay, at desktop widths. -->
+        <div id="sidebarOverlay" class="hidden fixed inset-0 bg-black/50 z-40 lg:hidden"></div>
 
         <!-- Sidebar / Drawer (Unified Pushing Toggle) -->
         <div id="sidebar" class="fixed lg:relative top-0 left-0 h-full lg:h-auto bg-[var(--sidebar-bg)] flex-col flex-shrink-0 z-50 transition-all duration-300 ease-in-out flex w-64 overflow-hidden mb-0 lg:mb-0">
@@ -526,9 +617,13 @@
                 <span id="explorerTitle" class="retro-header text-[10px] tracking-[0.2em] uppercase font-bold">Files Explorer</span>
                 <div class="flex items-center gap-2">
                     <button id="newFileBtn" class="w-5 h-5 bg-[var(--sidebar-bg)] hover:bg-[var(--border-color)] text-[var(--text-main)] border border-[var(--border-color)] flex items-center justify-center font-bold font-mono text-xs transition-all">+</button>
+                    <button id="playgroundNewFileBtn" class="hidden w-5 h-5 bg-[var(--sidebar-bg)] hover:bg-[var(--border-color)] text-[var(--text-main)] border border-[var(--border-color)] items-center justify-center font-bold font-mono text-xs transition-all">+</button>
                 </div>
             </div>
             <div id="projectBadge" class="mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate" title="Current Workspace Project">
+                [ Project: Scratchpad ]
+            </div>
+            <div id="playgroundProjectBadge" class="hidden mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate" title="Current Playground Project">
                 [ Project: Scratchpad ]
             </div>
             <div id="fileTreeList" class="flex-grow overflow-y-auto p-3 space-y-2 min-w-[240px]">
@@ -536,6 +631,9 @@
             </div>
             <div id="levelListPane" class="hidden flex-grow overflow-y-auto p-3 space-y-2 min-w-[240px]">
                 <!-- dynamic levels -->
+            </div>
+            <div id="playgroundFileTreeList" class="hidden flex-grow overflow-y-auto p-3 space-y-2 min-w-[240px]">
+                <!-- dynamic playground files -->
             </div>
 
             <div class="p-4 flex flex-col gap-3 min-w-[240px]">
@@ -563,6 +661,22 @@
                     </label>
                 </div>
 
+                <!-- Playground's own Save/Load Cloud pair -- separate buttons
+                     (not shared with IDE's) since they write/read a sibling
+                     `playgroundProject` field via a second FileSystemBloc
+                     instance (see app.js). v1 scope: no autosave checkbox
+                     here, matches the plan. -->
+                <div id="playgroundOnlySidebarFooter" class="hidden flex-col gap-3">
+                    <div class="flex gap-2">
+                        <button id="playgroundCloudSaveBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" style="background-color: var(--btn-blue-bg); color: var(--btn-blue-text); border-color: var(--btn-blue-text);" disabled>
+                            SAVE CLOUD
+                        </button>
+                        <button id="playgroundCloudLoadBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" style="background-color: var(--btn-blue-bg); color: var(--btn-blue-text); border-color: var(--btn-blue-text);" disabled>
+                            LOAD CLOUD
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Sidebar Utility Footer -- no border here: in Learn mode
                      the buttons above are hidden, so this line would sit
                      directly under the wrapper's own border-t with nothing
@@ -572,6 +686,10 @@
                     <div class="flex items-center flex-wrap gap-x-3 gap-y-1">
                         <button id="showDocsBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Hardware Reference">[Docs]</button>
                         <button id="themeToggle" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Toggle Theme">[<span id="themeIcon">Dark</span>]</button>
+                        <!-- See HotkeysUI.js -- toggles the small key badges
+                             on every hotkey-bound button (hidden by default).
+                             Same '?' key also toggles this. -->
+                        <button id="hotkeysToggleBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors opacity-60" title="Mostrar/ocultar atajos de teclado (o presiona '?')">[Keys]</button>
                         <button id="recoveryModeBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-red-400 transition-colors" title="Recovery Mode / Mass Erase">[Recovery]</button>
                     </div>
                     <div id="appVersionTag" class="text-[8px] font-mono select-none" style="color: var(--sidebar-text); opacity: 0.4;">v1.3.2</div>
@@ -580,7 +698,7 @@
         </div>
 
         <!-- Main Area -->
-        <div class="flex-grow flex flex-col space-y-2 lg:space-y-3 min-w-0 h-full">
+        <div id="mainArea" class="flex-grow flex flex-col min-w-0 h-full" style="background-color: var(--terminal-bg);">
             <!-- Specification/Design + mission navigation moved into the
                  sidebar's unit tree (LevelListUI) -- expanding a unit shows
                  its Specification + missions as children, same interaction
@@ -588,13 +706,13 @@
                  anymore, in Learn mode or IDE mode. -->
 
             <!-- Editor Container -- borderless, uses all the space it's given -->
-            <div id="editorContainer" class="flex-grow overflow-hidden bg-[var(--terminal-bg)] min-h-0 relative h-full flex flex-col">
+            <div id="editorContainer" class="flex-grow overflow-hidden min-h-0 relative h-full flex flex-col" style="background-color: var(--terminal-bg);">
                 <div id="editor" class="w-full h-full flex-grow"></div>
             </div>
 
             <!-- Theory panel (Learn mode, shown via the Theory tab) -->
-            <div id="theoryTabPanel" class="hidden flex-grow overflow-hidden bg-[var(--terminal-bg)] min-h-0">
-                <div id="theoryContent" class="h-full overflow-y-auto p-6 lg:p-8 md-content"></div>
+            <div id="theoryTabPanel" class="hidden flex-grow overflow-hidden min-h-0" style="background-color: var(--terminal-bg);">
+                <div id="theoryContent" class="h-full overflow-y-auto p-6 lg:p-8 md-content" style="background-color: var(--terminal-bg);"></div>
             </div>
         </div> <!-- End of Main Area -->
     </div> <!-- End of Workspace -->
@@ -615,6 +733,9 @@
                     </button>
                     <button id="resultsTabBtn" class="hidden ascii-tab">
                         TEST RESULTS
+                    </button>
+                    <button id="consoleTabBtn" class="hidden ascii-tab">
+                        TERMINAL
                     </button>
                 </div>
 
@@ -646,6 +767,14 @@
                         <button id="clearResultsBtn" class="text-[9px] font-bold uppercase text-[var(--sidebar-text)] opacity-50 hover:opacity-90">Clear</button>
                     </div>
 
+                    <!-- Terminal (Playground) tab controls -- just Clear, same
+                         as every other tab's header. The command line itself
+                         lives at the BOTTOM of the panel now, like a real
+                         terminal prompt (see #consolePanel below). -->
+                    <div id="consoleControls" class="hidden items-center gap-4">
+                        <button id="consoleClearBtn" class="text-[9px] font-bold uppercase text-[var(--sidebar-text)] opacity-50 hover:opacity-90">Clear</button>
+                    </div>
+
                     <!-- Global Toggle Terminal Button (Always visible in both Learn & IDE modes) -->
                     <button id="toggleTerminalBtn" title="Colapsar / Expandir Terminal" class="text-[var(--sidebar-text)] opacity-60 hover:opacity-100 p-1 flex items-center justify-center">
                         <svg class="w-4 h-4 transform rotate-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -663,6 +792,19 @@
 
             <!-- Test Results panel -->
             <div id="resultsOutput" class="hidden p-3 flex-grow overflow-y-auto space-y-3 custom-scrollbar"></div>
+
+            <!-- Terminal (Playground) panel -- a real command transcript,
+                 not a log feed: each line is either the "$ <command>" the
+                 student typed or raw stdout/stderr from executing it. The
+                 prompt lives at the BOTTOM, like a real terminal, instead
+                 of a text box up in the tab header (see ConsoleUI.js). -->
+            <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow">
+                <div id="consoleOutput" class="flex-grow min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed bg-[var(--log-bg)] custom-scrollbar"></div>
+                <div class="flex items-center gap-2 px-3 py-2 flex-shrink-0 border-t border-[var(--border-color)] bg-[var(--log-bg)]">
+                    <span class="font-mono text-[11px] font-bold text-[var(--accent-text)] select-none">$</span>
+                    <input id="consoleCommandInput" type="text" placeholder="gcc main.c -o prog && ./prog" spellcheck="false" autocomplete="off" class="flex-grow bg-transparent font-mono text-[11px] text-[var(--text-main)] focus:outline-none placeholder:opacity-40">
+                </div>
+            </div>
         </div>
 
         <!-- Right: Telemetry Dashboard (IDE mode only) -->
@@ -684,19 +826,19 @@
                         <div class="space-y-1.5">
                             <div class="flex justify-between text-[9px] font-mono">
                                 <span class="text-[var(--sidebar-text)] opacity-70 uppercase">Flash Storage</span>
-                                <span id="flashUsageText" class="text-[var(--btn-green-text)]">0%</span>
+                                <span id="flashUsageText" class="text-[var(--success-text)]">0%</span>
                             </div>
                             <div class="bg-[var(--track-bg)] h-1.5 overflow-hidden border border-[var(--track-border)]">
-                                <div id="flashUsageBar" class="bg-[var(--btn-green-text)] h-full transition-all duration-500" style="width: 0%"></div>
+                                <div id="flashUsageBar" class="bg-[var(--success-text)] h-full transition-all duration-500" style="width: 0%"></div>
                             </div>
                         </div>
                         <div class="space-y-1.5">
                             <div class="flex justify-between text-[9px] font-mono">
                                 <span class="text-[var(--sidebar-text)] opacity-70 uppercase">RAM Runtime</span>
-                                <span id="ramUsageText" class="text-[var(--btn-green-text)]">0%</span>
+                                <span id="ramUsageText" class="text-[var(--success-text)]">0%</span>
                             </div>
                             <div class="bg-[var(--track-bg)] h-1.5 overflow-hidden border border-[var(--track-border)]">
-                                <div id="ramUsageBar" class="bg-[var(--btn-green-text)] h-full transition-all duration-500" style="width: 0%"></div>
+                                <div id="ramUsageBar" class="bg-[var(--success-text)] h-full transition-all duration-500" style="width: 0%"></div>
                             </div>
                         </div>
                     </div>

@@ -1,9 +1,14 @@
 import { Bloc } from '../core/Bloc.js';
 import { globalEventBus } from '../core/EventBus.js';
 import { parseGccErrors } from '../core/gccErrorParser.js';
+import { compileToWasm, runWasmModule } from '../core/WasmToolchain.js';
 
 const PROGRESS_KEY = 'apm32_learn_progress';
 const draftKey = (unitId, exerciseId) => `apm32_learn_draft_${unitId}_${exerciseId}`;
+// Same trailing-whitespace-insensitive comparison backend/learnRunner.js's
+// own normalize() used -- kept identical so a test that passed server-side
+// still passes here, and vice versa.
+const normalizeOutput = (output) => (output || '').replace(/\s+$/, '');
 
 /**
  * LearnBloc
@@ -49,14 +54,7 @@ export class LearnBloc extends Bloc {
     }
 
     isUnitUnlocked(unit) {
-        if (!unit || !unit.prerequisites || unit.prerequisites.length === 0) return true;
-
-        // A prerequisite unit is considered completed if at least 1 exercise in it is passed
-        return unit.prerequisites.every(preId => {
-            const preUnit = this.state.units.find(u => u.id === preId);
-            if (!preUnit || !preUnit.exercises) return false;
-            return preUnit.exercises.some(ex => !!this.state.progress[`${preId}/${ex.id}`]);
-        });
+        return true;
     }
 
     isExercisePassed(unitId, exerciseId) {
@@ -67,6 +65,46 @@ export class LearnBloc extends Bloc {
         const unit = this.state.units.find(u => u.id === unitId);
         if (!unit || !unit.exercises) return 0;
         return unit.exercises.filter(ex => !!this.state.progress[`${unitId}/${ex.id}`]).length;
+    }
+
+    // Mirrors FileSystemBloc's saveProjectToCloud/loadProjectFromCloud pair
+    // exactly (call-time db/user params, not constructor deps -- LearnBloc
+    // stays Auth-agnostic). Both live on the same users/{uid} doc the
+    // project save already uses, under a sibling `learnProgress` field.
+    async loadProgressFromCloud(db, user) {
+        if (!user) return;
+        try {
+            const doc = await db.collection("users").doc(user.uid).get();
+            const cloudProgress = (doc.exists && doc.data().learnProgress) || {};
+            // Union, not overwrite -- progress is monotonic (an exercise,
+            // once passed, stays passed), so merging can never lose a real
+            // pass in either direction. Contrast with the project save's
+            // plain overwrite, which is correct there because file content
+            // genuinely can conflict.
+            const merged = { ...cloudProgress, ...this.state.progress };
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify(merged));
+            this.emit({ progress: merged });
+            // Push the merged result back up immediately -- covers "had
+            // local-only progress before ever logging in" by syncing it to
+            // the cloud on this same login, not waiting for the next
+            // passed exercise.
+            await this.saveProgressToCloud(db, user);
+        } catch (err) {
+            globalEventBus.emit('LOG', { message: `Error cargando progreso: ${err.message}`, type: 'error' });
+        }
+    }
+
+    async saveProgressToCloud(db, user) {
+        if (!user) return;
+        try {
+            // merge: true is load-bearing here -- a plain .set() would wipe
+            // out the `project`/`email` fields FileSystemBloc's cloud save
+            // already wrote to this same document.
+            await db.collection("users").doc(user.uid)
+                .set({ learnProgress: this.state.progress }, { merge: true });
+        } catch (err) {
+            globalEventBus.emit('LOG', { message: `Error guardando progreso: ${err.message}`, type: 'error' });
+        }
     }
 
     async loadLevelsIndex() {
@@ -118,7 +156,7 @@ export class LearnBloc extends Bloc {
                 currentExercise: exercise,
                 // Also provide currentLevelId for backward compatibility with EditorUI / test results
                 currentLevelId: `${unitId}/${exercise.id}`,
-                currentView: 'code', // land on code, not wherever theory was left
+                currentView: 'theory', // selecting a unit opens its Specification first
                 code,
                 theoryMd,
                 lastResult: null
@@ -198,25 +236,82 @@ export class LearnBloc extends Bloc {
         localStorage.setItem(draftKey(this.state.currentUnitId, this.state.currentExerciseId), this.state.code);
     }
 
+    // Compiles+runs entirely in the browser (vendored wasm-clang -- see
+    // WasmToolchain.js) against this exercise's own tests.json (mirrored
+    // into frontend/learn-levels/ specifically for this: it used to live
+    // backend-only, on purpose, so a curious student couldn't just read
+    // expected outputs from the Network tab before ever attempting the
+    // exercise -- worth knowing that tradeoff shifted here, though today's
+    // UI already reveals a failed test's own expectedStdout anyway).
+    async gradeLocally(unitId, exerciseId, code, onProgress) {
+        const testsRes = await fetch(`learn-levels/${unitId}/${exerciseId}/tests.json`);
+        if (!testsRes.ok) throw new Error('tests.json not found locally');
+        const tests = await testsRes.json();
+
+        const compiled = await compileToWasm({ 'main.c': code }, onProgress);
+        if (!compiled.success) {
+            return { success: false, stage: 'compile', stderr: compiled.stderr };
+        }
+
+        if (onProgress) onProgress('Ejecutando pruebas...');
+        const results = [];
+        for (let i = 0; i < tests.length; i++) {
+            const test = tests[i];
+            // Same compiled module reused across every test case, one
+            // run per test's own stdin.
+            const run = await runWasmModule(compiled.module, test.stdin || '');
+            const passed = normalizeOutput(run.stdout) === normalizeOutput(test.expectedStdout);
+            results.push({
+                index: i,
+                passed,
+                actualStdout: run.stdout,
+                expectedStdout: test.expectedStdout,
+                timedOut: false
+            });
+        }
+
+        return { success: true, stage: 'tests', allPassed: results.every(r => r.passed), results };
+    }
+
+    // Fallback path -- same server-side grader this app used exclusively
+    // before WASM: only reached if the local compiler itself couldn't run
+    // (the vendored wasm-clang assets failed to load, etc.), never for the
+    // student's own compile errors (those come back as a normal 'compile'
+    // stage result either way).
+    async gradeOnServer(apiUrl, levelKey, code) {
+        const response = await fetch(`${apiUrl}/learn/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ levelId: levelKey, code })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Grading failed');
+        return result;
+    }
+
     async runTests(apiUrl, code) {
         if (this.state.isGrading || !this.state.currentUnitId || !this.state.currentExerciseId) return;
 
-        const levelKey = `${this.state.currentUnitId}/${this.state.currentExerciseId}`;
+        const unitId = this.state.currentUnitId;
+        const exerciseId = this.state.currentExerciseId;
+        const levelKey = `${unitId}/${exerciseId}`;
         this.emit({ isGrading: true, lastResult: null });
         globalEventBus.emit('LEARN_STATUS', { status: 'grading' });
         globalEventBus.emit('COMPILER_ERRORS', { markers: [] });
         globalEventBus.emit('LOG', { message: `Evaluando '${this.state.currentExercise.title}'...`, type: 'warn' });
 
         try {
-            const response = await fetch(`${apiUrl}/learn/run`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ levelId: levelKey, code })
-            });
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.error || 'Grading failed');
+            let result;
+            try {
+                result = await this.gradeLocally(unitId, exerciseId, code, (msg) => {
+                    globalEventBus.emit('LOG', { message: msg, type: 'info' });
+                });
+            } catch (wasmErr) {
+                globalEventBus.emit('LOG', {
+                    message: `Compilador local no disponible (${wasmErr.message}) -- usando el servidor...`,
+                    type: 'warn'
+                });
+                result = await this.gradeOnServer(apiUrl, levelKey, code);
             }
 
             if (result.stage === 'compile') {
@@ -234,9 +329,14 @@ export class LearnBloc extends Bloc {
                 localStorage.setItem(PROGRESS_KEY, JSON.stringify(newProgress));
                 this.emit({ isGrading: false, lastResult: result, progress: newProgress });
                 globalEventBus.emit('LOG', { message: 'Pruebas completadas exitosamente!', type: 'success' });
+                // Cloud sync is opt-out-free (unlike the IDE project's
+                // autosave checkbox) since there's no destructive-overwrite
+                // risk here -- app.js's listener silently no-ops if nobody's
+                // logged in, so this is a no-op for the common anonymous case.
+                globalEventBus.emit('LEARN_PROGRESS_UPDATED', { progress: newProgress });
             } else {
                 this.emit({ isGrading: false, lastResult: result });
-                globalEventBus.emit('LOG', { message: 'Algunas pruebas fallaron. Revisa la pestaña Results.', type: 'error' });
+                globalEventBus.emit('LOG', { message: 'Algunas pruebas fallaron.', type: 'error' });
             }
             globalEventBus.emit('LEARN_STATUS', { status: 'done' });
             globalEventBus.emit('LEARN_RESULT', result);

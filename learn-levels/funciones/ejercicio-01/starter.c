@@ -12,8 +12,15 @@
  * Potencia: 0.66 W
  */
 
-// TODO: Define celsius_a_fahrenheit y calcular_potencia
+float celsius_a_fahrenheit(float c) {
+    // TODO: retorna (c * 1.8) + 32.0
+    return 0.0;
+}
 
+float calcular_potencia(float v, float i) {
+    // TODO: retorna v * i
+    return 0.0;
+}
 
 int main(void) {
     float f = celsius_a_fahrenheit(25.0);

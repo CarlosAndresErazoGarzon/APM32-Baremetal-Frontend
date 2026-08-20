@@ -29,7 +29,7 @@ export class TestResultsUI {
         this.container.innerHTML = '';
 
         if (result.stage === 'compile') {
-            const body = `<pre class="whitespace-pre-wrap" style="color: var(--sidebar-text);">${this.escapeHtml(result.stderr || '')}</pre>`;
+            const body = `<pre class="whitespace-pre-wrap p-2 border border-[var(--border-color)] bg-[var(--log-bg)] text-red-400 font-mono text-[11px]">${this.escapeHtml(result.stderr || '')}</pre>`;
             this.container.appendChild(this.renderCard('Compile Error', 'ERROR', 'bad', body));
             return;
         }
@@ -38,13 +38,13 @@ export class TestResultsUI {
             const status = test.timedOut ? 'TIMED OUT' : (test.passed ? 'PASS' : 'FAIL');
             const tone = test.passed ? 'ok' : 'bad';
 
-            let body = `<div class="mb-1 opacity-70">Your output:</div>`;
-            body += `<pre class="whitespace-pre-wrap mb-2" style="color: var(--sidebar-text);">${this.escapeHtml(test.actualStdout || '(nothing printed)')}</pre>`;
+            let body = `<div class="mb-1 text-[var(--text-muted)] font-mono text-[11px]">Your output:</div>`;
+            body += `<pre class="whitespace-pre-wrap mb-2 p-2 border border-[var(--border-color)] bg-[var(--log-bg)] text-[var(--text-main)] font-mono text-[11px]">${this.escapeHtml(test.actualStdout || '(nothing printed)')}</pre>`;
             if (test.timedOut) {
-                body += `<div class="opacity-70">Took too long to finish -- check for an infinite loop.</div>`;
+                body += `<div class="text-amber-400 font-mono text-[11px]">Took too long to finish -- check for an infinite loop.</div>`;
             } else if (!test.passed) {
-                body += `<div class="mb-1 opacity-70">Expected:</div>`;
-                body += `<pre class="whitespace-pre-wrap" style="color: var(--sidebar-text);">${this.escapeHtml(test.expectedStdout || '')}</pre>`;
+                body += `<div class="mb-1 text-[var(--text-muted)] font-mono text-[11px]">Expected:</div>`;
+                body += `<pre class="whitespace-pre-wrap p-2 border border-[var(--border-color)] bg-[var(--log-bg)] text-[var(--text-main)] font-mono text-[11px]">${this.escapeHtml(test.expectedStdout || '')}</pre>`;
             }
 
             this.container.appendChild(this.renderCard(`Test ${test.index + 1}`, status, tone, body));
@@ -53,17 +53,17 @@ export class TestResultsUI {
 
     renderCard(title, statusLabel, tone, bodyHtml) {
         const div = document.createElement('div');
-        div.className = "p-3 rounded border text-xs font-mono";
+        div.className = "p-3 border text-xs font-mono mb-2";
         div.style.borderColor = "var(--border-color)";
-        div.style.backgroundColor = "var(--track-bg)";
+        div.style.backgroundColor = "var(--sidebar-bg)";
 
-        const pillColor = tone === 'ok' ? 'var(--btn-green-text)' : 'var(--btn-red-text)';
-        const pillBg = tone === 'ok' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(248, 113, 113, 0.12)';
+        const pillColor = tone === 'ok' ? 'var(--success-text)' : 'var(--danger-text)';
+        const pillBg = tone === 'ok' ? 'rgba(16, 185, 129, 0.16)' : 'rgba(248, 113, 113, 0.16)';
 
         div.innerHTML = `
             <div class="flex items-center justify-between mb-2">
-                <span class="font-bold" style="color: var(--sidebar-text);">${title}</span>
-                <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style="color: ${pillColor}; background: ${pillBg};">${statusLabel}</span>
+                <span class="font-bold text-[var(--header-color)]">${title}</span>
+                <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-none font-mono" style="color: ${pillColor}; background: ${pillBg}; border: 1px solid ${pillColor};">${statusLabel}</span>
             </div>
             ${bodyHtml}
         `;

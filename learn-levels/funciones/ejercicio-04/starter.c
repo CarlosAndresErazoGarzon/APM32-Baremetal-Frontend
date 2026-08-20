@@ -14,8 +14,10 @@
  * Entrada 45 -> Clamped: 45
  */
 
-// TODO: int clamp(int valor, int min, int max)
-
+int clamp(int valor, int min, int max) {
+    // TODO: aplica los limites min/max
+    return valor;
+}
 
 int main(void) {
     printf("Entrada 120 -> Clamped: %d\n", clamp(120, 0, 100));

@@ -7,15 +7,20 @@
  *   - Escribe: "Inicio del Sistema\n"
  *   - Escribe: "ID Dispositivo: 101\n"
  *   - Cierra con fclose()
- * 
- * Salida en consola:
+ *
+ * Salida en consola (solo si el archivo se creo correctamente):
  * Archivo log.txt creado exitosamente.
  */
 
 int main(void) {
-    // TODO: Crea el archivo log.txt y cierra el descriptor
+    FILE *f = NULL;
+
+    // TODO: Abre "log.txt" en modo "w" (asigna el resultado a f), escribe
+    // las dos lineas y cierra con fclose()
 
 
-    printf("Archivo log.txt creado exitosamente.\n");
+    if (f != NULL) {
+        printf("Archivo log.txt creado exitosamente.\n");
+    }
     return 0;
 }

@@ -1,0 +1,147 @@
+/**
+ * ConsoleUI
+ * Playground's manual "terminal" tab -- a real command line the student
+ * types themselves (their own gcc flags, &&-chains, just "./prog" after a
+ * previous compile, etc.) instead of the fixed compile-then-run RUN button
+ * does. The prompt lives at the bottom of the panel, like a real terminal,
+ * not a text box up in the tab header. Owns #consoleOutput/
+ * #consoleCommandInput/#consoleClearBtn exclusively; visibility (Playground
+ * mode only) is owned by ModeSwitcherUI, tab switching by TerminalUI --
+ * this class only owns what happens once the tab is actually showing.
+ *
+ * Each submitted command is a fresh, disposable sandbox job seeded from
+ * the CURRENT file manager state (see backend/learnRunner.js's
+ * execCommand()) -- there's no real persistent shell/cwd across commands,
+ * but since every run's outputFiles get merged back into the file manager
+ * before the next command starts, it still *feels* stateful across
+ * commands (a file one command creates is there for the next one).
+ *
+ * Compiled binaries are a special case: they're deliberately never merged
+ * into the file manager (they'd just render as garbage in Monaco), but
+ * they still need to survive to the NEXT command -- "gcc main.c -o test"
+ * then, separately, "./test" -- so they're kept in `this.sessionBinaries`
+ * instead, a private base64 bucket only this class ever sees, sent along
+ * with every exec() call and refreshed from every response.
+ */
+export class ConsoleUI {
+    constructor(playgroundBloc, playgroundFsBloc, apiUrl, editorGetter) {
+        this.playgroundBloc = playgroundBloc;
+        this.playgroundFsBloc = playgroundFsBloc;
+        this.apiUrl = apiUrl;
+        this.getEditorContent = editorGetter;
+        this.sessionBinaries = {};
+
+        this.output = document.getElementById('consoleOutput');
+        this.input = document.getElementById('consoleCommandInput');
+        this.clearBtn = document.getElementById('consoleClearBtn');
+
+        this.initEventListeners();
+    }
+
+    initEventListeners() {
+        if (this.input) {
+            this.input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.execute();
+                }
+            });
+        }
+        if (this.clearBtn && this.output) {
+            // Clearing the transcript also drops any compiled binaries from
+            // this session -- a clean slate, not just a visual reset, so a
+            // stale "./test" from a previous unrelated attempt can't linger
+            // silently.
+            this.clearBtn.onclick = () => {
+                this.output.innerHTML = '';
+                this.sessionBinaries = {};
+                this.playgroundFsBloc.setBinaryNames([]);
+            };
+        }
+    }
+
+    async execute() {
+        if (!this.input || !this.output) return;
+        const command = this.input.value.trim();
+        if (!command) return;
+        if (this.playgroundBloc.state.isExecuting) return;
+
+        this.appendLine(`$ ${command}`, 'command');
+        this.input.value = '';
+        this.setBusy(true);
+
+        // virtualFS only gets the current file's latest text on a file
+        // SWITCH (see EditorUI.renderPlayground()), not on every keystroke
+        // -- so patch it into `files` for this request AND persist it into
+        // the bloc itself. Skipping the persist was a real, reported bug: a
+        // stray emit right after this (e.g. setBinaryNames() below, fired
+        // by nothing more than "gcc main.c -o test" producing a binary)
+        // made renderPlayground() see the editor/virtualFS disagree and
+        // "self-heal" the editor back to the stale content -- silently
+        // reverting whatever was just typed to the Playground seed.
+        const state = this.playgroundFsBloc.state;
+        const files = { ...state.virtualFS };
+        if (state.currentFile) {
+            files[state.currentFile] = this.getEditorContent();
+            this.playgroundFsBloc.updateFileContent(state.currentFile, files[state.currentFile]);
+        }
+
+        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, '', this.sessionBinaries);
+        this.setBusy(false);
+
+        if (result.stdout) this.appendLine(result.stdout.replace(/\n$/, ''), 'stdout');
+        if (result.stderr) this.appendLine(result.stderr.replace(/\n$/, ''), 'stderr');
+
+        if (result.timedOut) {
+            this.appendLine('[timed out]', 'stderr');
+        } else if (typeof result.code === 'number') {
+            this.appendLine(`[exit code ${result.code}]`, result.code === 0 ? 'success' : 'stderr');
+        }
+
+        if (result.outputFiles) {
+            this.playgroundFsBloc.mergeChangedFiles(files, result.outputFiles);
+        }
+        // Carry compiled binaries (or any other genuinely binary output)
+        // forward for the next command -- overwrite, don't merge-forever:
+        // this IS the full current set the server just reported back.
+        if (result.binaryFiles) {
+            this.sessionBinaries = result.binaryFiles;
+            // Names only (not the base64 bytes) so the file manager can
+            // show that they exist -- see FileSystemBloc.setBinaryNames().
+            this.playgroundFsBloc.setBinaryNames(Object.keys(this.sessionBinaries));
+        }
+    }
+
+    setBusy(busy) {
+        if (this.input) this.input.disabled = busy;
+        // preventScroll: focusing this while the terminal pane is
+        // collapsed (overflow:hidden, no scrollable ancestor to satisfy
+        // the browser's default scroll-into-view) misplaces
+        // #terminalHeader -- see TerminalUI.js's own switchTerminalTab()
+        // for the confirmed repro of this exact bug.
+        if (!busy && this.input) this.input.focus({ preventScroll: true });
+    }
+
+    appendLine(text, kind) {
+        if (!text && kind !== 'command') return;
+        const div = document.createElement('div');
+        // stdout deliberately isn't pure/bright white -- same muted tone
+        // the Logs panel already uses for message text (TerminalUI.js's
+        // logMessage()), so a normal program's output doesn't glare against
+        // the near-black background the way full-brightness text would.
+        const isDark = !document.body.classList.contains('light-theme');
+        // stderr/success: same theme-aware red/emerald pairing TerminalUI's
+        // own logMessage() already uses -- the -400 shades read fine on the
+        // near-black dark background but wash out on light's near-white one.
+        const colorClass = {
+            command: isDark ? 'text-[var(--accent-text)] font-bold' : 'text-[var(--header-color)] font-bold',
+            stdout: isDark ? 'text-[var(--text-main)]' : 'text-[var(--text-main)]',
+            stderr: isDark ? 'text-red-400 font-semibold' : 'text-red-700 font-semibold',
+            success: isDark ? 'text-emerald-400 font-semibold' : 'text-emerald-800 font-semibold',
+        }[kind] || (isDark ? 'text-[var(--text-main)]' : 'text-[var(--text-main)]');
+        div.className = `whitespace-pre-wrap mb-0.5 ${colorClass}`;
+        div.textContent = text;
+        this.output.appendChild(div);
+        this.output.scrollTop = this.output.scrollHeight;
+    }
+}

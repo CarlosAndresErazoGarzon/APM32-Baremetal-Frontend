@@ -1,22 +1,38 @@
+import { globalEventBus } from '../core/EventBus.js';
+
 const INDENT_PX = 16;
 const FOLDER_ICON = `<svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>`;
 // Exported: LevelListUI reuses this exact chevron for the unit tree's own
 // expand/collapse, so both trees in the app share one expand affordance.
 export const CHEVRON_ICON = `<svg class="w-3 h-3 flex-shrink-0 transition-transform duration-150" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 20 20"><path stroke-linecap="round" stroke-linejoin="round" d="M7 5l6 5-6 5"></path></svg>`;
 const FILE_ICON_PATH = `<path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"></path>`;
+// A little terminal window -- distinguishes compiled binaries (from
+// ConsoleUI's manual "gcc ... -o test") from real source files at a glance.
+const BINARY_ICON = `<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path stroke-linecap="round" stroke-linejoin="round" d="M7 9l3 3-3 3M13 15h4"></path></svg>`;
+
+const DEFAULT_IDS = {
+    fileTreeList: 'fileTreeList',
+    newFileBtn: 'newFileBtn',
+    projectBadge: 'projectBadge',
+    exampleSelector: 'exampleSelector'
+};
 
 export class SidebarUI {
-    constructor(fileSystemBloc, editorGetter) {
+    // `ids` lets a second instance (Playground) target its own sibling
+    // panel's markup instead of IDE's -- defaults preserve today's exact
+    // element IDs, so the existing `new SidebarUI(fsBloc, editorGetter)`
+    // call site needs zero changes. Mobile-drawer wiring (#sidebar/
+    // #mobileMenuBtn/#sidebarOverlay) moved out to SidebarDrawerUI, a
+    // single app-wide singleton -- those elements are shared by both
+    // trees, so binding them here too would double-fire on every click.
+    constructor(fileSystemBloc, editorGetter, ids = DEFAULT_IDS) {
         this.fsBloc = fileSystemBloc;
         this.getEditorContent = editorGetter; // Callback to get Monaco content
 
-        this.fileListEl = document.getElementById('fileTreeList');
-        this.newFileBtn = document.getElementById('newFileBtn');
-        this.projectBadge = document.getElementById('projectBadge');
-        this.exampleSelector = document.getElementById('exampleSelector');
-        this.sidebar = document.getElementById('sidebar');
-        this.mobileMenuBtn = document.getElementById('mobileMenuBtn');
-        this.sidebarOverlay = document.getElementById('sidebarOverlay');
+        this.fileListEl = document.getElementById(ids.fileTreeList);
+        this.newFileBtn = document.getElementById(ids.newFileBtn);
+        this.projectBadge = document.getElementById(ids.projectBadge);
+        this.exampleSelector = ids.exampleSelector ? document.getElementById(ids.exampleSelector) : null;
 
         // Folder paths the user has manually collapsed (everything starts expanded)
         this.collapsedFolders = new Set();
@@ -28,12 +44,14 @@ export class SidebarUI {
     }
 
     initEventListeners() {
-        this.newFileBtn.onclick = () => {
-            const filename = prompt("Enter new filename (e.g., src/newfile.c):");
-            if (filename && filename.trim() !== "") {
-                this.fsBloc.createFile(filename.trim());
-            }
-        };
+        if (this.newFileBtn) {
+            this.newFileBtn.onclick = () => {
+                const filename = prompt("Enter new filename (e.g., src/newfile.c):");
+                if (filename && filename.trim() !== "") {
+                    this.fsBloc.createFile(filename.trim());
+                }
+            };
+        }
 
         if (this.exampleSelector) {
             this.exampleSelector.onchange = () => {
@@ -46,51 +64,10 @@ export class SidebarUI {
                 }
             };
         }
-
-        if (this.mobileMenuBtn) {
-            this.mobileMenuBtn.onclick = () => {
-                const isClosed = this.sidebar.classList.contains('w-0');
-                this.toggleMobileSidebar(isClosed);
-            };
-        }
-
-        if (this.sidebarOverlay) {
-            this.sidebarOverlay.onclick = () => this.toggleMobileSidebar(false);
-        }
-
-        // Open by default on desktop, closed on mobile
-        if (this.sidebar) {
-            if (window.innerWidth >= 1024) {
-                this.sidebar.classList.remove('w-0', '-translate-x-full');
-                this.sidebar.classList.add('w-64');
-            } else {
-                this.toggleMobileSidebar(false);
-            }
-        }
-    }
-
-    // No border classes here on purpose -- the sidebar is borderless now
-    // (background-color contrast against the editor is the only separator).
-    // These used to also toggle border-r/lg:border-2 on/off, independent of
-    // (and overriding) whatever index.html's own class list said.
-    toggleMobileSidebar(show) {
-        if (!this.sidebar) return;
-
-        if (show) {
-            this.sidebar.classList.remove('w-0', 'opacity-0', 'pointer-events-none');
-            this.sidebar.classList.add('w-64');
-            if (window.innerWidth < 1024 && this.sidebarOverlay) {
-                this.sidebarOverlay.classList.remove('hidden');
-            }
-        } else {
-            this.sidebar.classList.add('w-0', 'opacity-0', 'pointer-events-none');
-            this.sidebar.classList.remove('w-64');
-            if (this.sidebarOverlay) this.sidebarOverlay.classList.add('hidden');
-        }
     }
 
     render(state) {
-        this.renderFileList(state.virtualFS, state.currentFile);
+        this.renderFileList(state.virtualFS, state.currentFile, state.binaryNames);
         this.updateProjectBadge(state.projectType, state.projectName);
         this.syncExampleSelector(state.projectType, state.projectId);
     }
@@ -110,21 +87,28 @@ export class SidebarUI {
      * virtualFS map into a real nested tree, folders included, so the UI
      * can render actual folders (with icons, indentation, collapse) instead
      * of a flat list grouped by hardcoded "src"/"inc" prefixes.
+     *
+     * `binaryNames` (Playground only) are names ConsoleUI compiled via the
+     * manual terminal (e.g. "gcc main.c -o test") -- they're not in
+     * virtualFS at all (their actual bytes never touch the file manager or
+     * cloud save, see FileSystemBloc.setBinaryNames()), just their names,
+     * so the tree can at least show that they exist instead of a compiled
+     * program silently vanishing from view.
      */
-    buildTree(virtualFS) {
+    buildTree(virtualFS, binaryNames) {
         const root = { type: 'folder', name: '', path: '', children: new Map() };
 
-        for (const filepath of Object.keys(virtualFS)) {
+        const insert = (filepath, type) => {
             const parts = filepath.split('/');
             let node = root;
             let currentPath = '';
 
             parts.forEach((part, i) => {
                 currentPath = currentPath ? `${currentPath}/${part}` : part;
-                const isFile = i === parts.length - 1;
+                const isLeaf = i === parts.length - 1;
 
-                if (isFile) {
-                    node.children.set(part, { type: 'file', name: part, path: currentPath });
+                if (isLeaf) {
+                    node.children.set(part, { type, name: part, path: currentPath });
                 } else {
                     if (!node.children.has(part) || node.children.get(part).type !== 'folder') {
                         node.children.set(part, { type: 'folder', name: part, path: currentPath, children: new Map() });
@@ -132,25 +116,37 @@ export class SidebarUI {
                     node = node.children.get(part);
                 }
             });
+        };
+
+        for (const filepath of Object.keys(virtualFS)) {
+            insert(filepath, 'file');
+        }
+        for (const name of (binaryNames || [])) {
+            // A real source file always wins the slot if the compiled
+            // binary happens to share its name (shouldn't normally happen,
+            // but a student could plausibly compile "-o main.c" by mistake).
+            if (!virtualFS[name]) insert(name, 'binary');
         }
 
         return root;
     }
 
     sortedChildren(node) {
-        // Folders first, then files, alphabetically within each group
+        // Folders first, then real files, compiled binaries last --
+        // alphabetically within each group.
+        const rank = { folder: 0, file: 1, binary: 2 };
         return [...node.children.values()].sort((a, b) => {
-            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            if (a.type !== b.type) return rank[a.type] - rank[b.type];
             return a.name.localeCompare(b.name);
         });
     }
 
-    renderFileList(virtualFS, currentFile) {
+    renderFileList(virtualFS, currentFile, binaryNames) {
         if (!this.fileListEl) return;
         this.fileListEl.innerHTML = '';
 
         const isDark = !document.body.classList.contains('light-theme');
-        const tree = this.buildTree(virtualFS);
+        const tree = this.buildTree(virtualFS, binaryNames);
         const fragment = document.createDocumentFragment();
 
         this.renderNodeChildren(tree, 0, currentFile, isDark, fragment);
@@ -162,6 +158,8 @@ export class SidebarUI {
         this.sortedChildren(node).forEach(child => {
             if (child.type === 'folder') {
                 this.renderFolderRow(child, depth, currentFile, isDark, fragment);
+            } else if (child.type === 'binary') {
+                fragment.appendChild(this.renderBinaryRow(child, depth));
             } else {
                 fragment.appendChild(this.renderFileRow(child, depth, currentFile, isDark));
             }
@@ -357,21 +355,60 @@ export class SidebarUI {
         return div;
     }
 
+    // Compiled binaries from ConsoleUI's manual terminal (e.g. "gcc main.c
+    // -o test"). No content to show (their bytes never touch virtualFS --
+    // see FileSystemBloc.setBinaryNames()), so no click-to-open, no
+    // rename/delete menu -- just a dimmed, informational row confirming it
+    // exists. Clicking it explains itself instead of silently doing
+    // nothing (selectFile() would no-op since it's not really in virtualFS).
+    renderBinaryRow(node, depth) {
+        const div = document.createElement('div');
+        div.className = "flex items-center text-xs py-2.5 opacity-50 cursor-default";
+        div.style.paddingLeft = `${8 + depth * INDENT_PX}px`;
+        div.style.paddingRight = '10px';
+        div.style.color = "var(--sidebar-text)";
+        div.onclick = () => {
+            globalEventBus.emit('LOG', {
+                message: `${node.name} is a compiled binary from the Terminal tab -- not viewable/editable, but you can still run it (e.g. ./${node.name}).`,
+                type: 'info'
+            });
+        };
+
+        const nameContainer = document.createElement('div');
+        nameContainer.className = "flex items-center gap-3 overflow-hidden";
+        nameContainer.innerHTML = `
+            ${BINARY_ICON}
+            <span class="truncate font-medium tracking-wide">${node.name}</span>
+            <span class="text-[8px] uppercase tracking-wider flex-shrink-0">[exe]</span>
+        `;
+        div.appendChild(nameContainer);
+
+        return div;
+    }
+
     // Flat bracketed text, not a colored pill -- matches the [OK]/[M01]
     // bracket convention used everywhere else instead of adding another
     // rounded/tinted badge surface.
     updateProjectBadge(type, name) {
         if (!this.projectBadge) return;
+        // Preserve 'hidden' across the reassignment below -- that class is
+        // added/removed externally by ModeSwitcherUI based on which mode is
+        // active, not by this method. A plain `className =` here used to
+        // wipe it out on every FileSystemBloc emit (e.g. right after login,
+        // when loadProjectFromCloud() fires for whichever mode's bloc just
+        // got wired up), making a hidden-by-mode badge pop back into view.
+        const wasHidden = this.projectBadge.classList.contains('hidden');
         if (type === 'cloud') {
             this.projectBadge.innerText = `[ Project: ${name} ]`;
-            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--btn-green-text)] font-bold uppercase tracking-wider truncate';
+            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
         } else if (type === 'example') {
             this.projectBadge.innerText = `[ Example: ${name} ]`;
-            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--btn-green-text)] font-bold uppercase tracking-wider truncate';
+            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
         } else {
             this.projectBadge.innerText = '[ Project: Scratchpad ]';
             this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate';
         }
+        if (wasHidden) this.projectBadge.classList.add('hidden');
     }
 }
 

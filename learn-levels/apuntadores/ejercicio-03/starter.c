@@ -16,8 +16,9 @@ typedef struct {
     float voltaje;
 } Sensor_t;
 
-// TODO: void actualizar_sensor(Sensor_t *s, float nuevo_voltaje)
-
+void actualizar_sensor(Sensor_t *s, float nuevo_voltaje) {
+    // TODO: asigna s->voltaje = nuevo_voltaje;
+}
 
 int main(void) {
     Sensor_t s1 = {101, 2.80};
