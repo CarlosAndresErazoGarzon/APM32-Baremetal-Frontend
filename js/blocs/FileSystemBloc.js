@@ -87,7 +87,21 @@ export class FileSystemBloc extends Bloc {
         // or a fresh/seed slate" for app.js's example-auto-load guard.
         this.restoredFromLocal = !!draft;
         if (draft) {
-            this.emit({ virtualFS: draft.virtualFS, currentFile: draft.currentFile });
+            // projectType/projectName/projectId reset too, not just the
+            // files -- a real reported bug without this: logging out left
+            // the previous account's email sitting in the sidebar's
+            // "PROJECT: ..." badge, because this branch only ever touched
+            // virtualFS/currentFile. A restored local draft is never the
+            // confirmed cloud copy, so 'scratchpad' is right here even
+            // while signing IN -- loadProjectFromCloud() flips it to
+            // 'cloud' right after, if that account actually has one.
+            this.emit({
+                virtualFS: draft.virtualFS,
+                currentFile: draft.currentFile,
+                projectType: 'scratchpad',
+                projectName: '',
+                projectId: null
+            });
             return;
         }
 

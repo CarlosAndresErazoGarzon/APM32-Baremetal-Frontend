@@ -526,6 +526,9 @@
         body.light-theme #consoleCommandInput {
             color: var(--text-main) !important;
         }
+        body.light-theme #consoleStdinInput {
+            color: var(--text-main) !important;
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden">
@@ -534,7 +537,18 @@
     <!-- Top Navigation -->
     <nav class="bg-[var(--sidebar-bg)] px-3 py-1 lg:px-4 lg:py-1 flex flex-col lg:flex-row gap-3 justify-between items-center z-[60] relative">
         <div class="flex items-center justify-between w-full lg:w-auto">
-            <div class="flex items-center space-x-3">
+            <!-- flex-wrap + gap (not the old space-x, which doesn't add
+                 vertical spacing across wrapped lines): a real reported bug
+                 at very narrow widths (~320-375px, an iPad's narrower Split
+                 View pane) -- hamburger + title + the 3 mode buttons never
+                 wrap or shrink, so their combined width (~400px+) overflows
+                 <nav> horizontally, and since body is overflow-hidden with
+                 no scroll fallback, everything past the edge is just gone
+                 (reported as "the bottom panel disappeared", but it's really
+                 the whole nav row overflowing, not anything panel-specific).
+                 Wrapping lets the mode buttons drop to their own line
+                 instead of being clipped. -->
+            <div class="flex items-center flex-wrap gap-x-3 gap-y-1">
                 <!-- Sidebar Toggle -->
                 <button id="mobileMenuBtn" class="p-2 text-[var(--header-color)] hover:text-[var(--accent-text)] transition-colors" title="Toggle File Tree">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
@@ -551,7 +565,7 @@
                 <div id="projectTitle" class="retro-header text-[8px] leading-[1] lg:text-[9px] whitespace-pre font-mono overflow-hidden select-none max-w-[120px] lg:max-w-[420px] max-h-[40px] lg:max-h-[48px] flex-shrink-0">
                     <!-- Dynamic ASCII Art -->
                 </div>
-                <div class="nav-toggle-group flex items-center gap-1 ml-3 border border-[var(--border-color)] bg-[var(--terminal-bg)] p-0.5 flex-shrink-0">
+                <div class="nav-toggle-group flex items-center gap-1 border border-[var(--border-color)] bg-[var(--terminal-bg)] p-0.5 flex-shrink-0">
                     <button id="ideModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">IDE</button>
                     <button id="learnModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">LEARN</button>
                     <button id="playgroundModeBtn" class="px-3 py-1 text-[10px] font-mono font-bold uppercase transition-all tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">PLAYGROUND</button>
@@ -810,6 +824,19 @@
                  of a text box up in the tab header (see ConsoleUI.js). -->
             <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow">
                 <div id="consoleOutput" class="flex-grow min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed bg-[var(--log-bg)] custom-scrollbar"></div>
+                <!-- Optional stdin for the NEXT command -- each run is a
+                     fresh, non-interactive sandbox process (see
+                     ConsoleUI.js), so there's no way to type more input
+                     WHILE a program like scanf()/getchar() is already
+                     running and waiting. This is the workaround: whatever
+                     is here gets fed to the program's stdin from the
+                     start, one line per read. Collapsed by default --
+                     most commands (gcc, ls, ./prog with no input) don't
+                     need it. -->
+                <div class="border-t border-[var(--border-color)] bg-[var(--log-bg)] flex-shrink-0">
+                    <button id="consoleStdinToggle" class="w-full text-left px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-60 hover:opacity-100 transition-opacity" title="Texto que se envía como entrada estándar (stdin) al programa que corras a continuación">[+] Stdin</button>
+                    <textarea id="consoleStdinInput" rows="2" placeholder="Entrada para scanf/getchar/gets del próximo programa que corras -- una línea por lectura" spellcheck="false" class="hidden w-full resize-y bg-transparent font-mono text-[11px] text-[var(--text-main)] px-3 pb-2 focus:outline-none placeholder:opacity-40"></textarea>
+                </div>
                 <div class="flex items-center gap-2 px-3 py-2 flex-shrink-0 border-t border-[var(--border-color)] bg-[var(--log-bg)]">
                     <span class="font-mono text-[11px] font-bold text-[var(--accent-text)] select-none">$</span>
                     <input id="consoleCommandInput" type="text" placeholder="gcc main.c -o prog && ./prog" spellcheck="false" autocomplete="off" class="flex-grow bg-transparent font-mono text-[11px] text-[var(--text-main)] focus:outline-none placeholder:opacity-40">

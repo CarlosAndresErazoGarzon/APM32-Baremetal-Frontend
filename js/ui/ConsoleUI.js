@@ -38,11 +38,20 @@ export class ConsoleUI {
         this.output = document.getElementById('consoleOutput');
         this.input = document.getElementById('consoleCommandInput');
         this.clearBtn = document.getElementById('consoleClearBtn');
+        this.stdinInput = document.getElementById('consoleStdinInput');
+        this.stdinToggle = document.getElementById('consoleStdinToggle');
 
         this.initEventListeners();
     }
 
     initEventListeners() {
+        if (this.stdinToggle && this.stdinInput) {
+            this.stdinToggle.onclick = () => {
+                const nowHidden = this.stdinInput.classList.toggle('hidden');
+                this.stdinToggle.textContent = nowHidden ? '[+] Stdin' : '[-] Stdin';
+                if (!nowHidden) this.stdinInput.focus();
+            };
+        }
         if (this.input) {
             this.input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
@@ -89,6 +98,20 @@ export class ConsoleUI {
         if (!command) return;
         if (this.playgroundBloc.state.isExecuting) return;
 
+        // Special-cased client-side instead of sent to the sandbox: this
+        // transcript is a plain scrolling div, not a real terminal emulator
+        // (no xterm.js), so it can't interpret ANSI escape codes -- the
+        // real Unix `clear` binary would just dump its literal control
+        // bytes as visible garbage ("[H[2J[3J") instead of actually
+        // clearing anything. Only wipes the transcript, unlike the Clear
+        // BUTTON, which also drops compiled binaries -- `clear` the shell
+        // command doesn't touch program state in a real terminal either.
+        if (command === 'clear') {
+            this.output.innerHTML = '';
+            this.input.value = '';
+            return;
+        }
+
         this.appendLine(`$ ${command}`, 'command');
         this.input.value = '';
         this.setBusy(true);
@@ -109,7 +132,14 @@ export class ConsoleUI {
             this.playgroundFsBloc.updateFileContent(state.currentFile, files[state.currentFile]);
         }
 
-        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, '', this.sessionBinaries);
+        // Whatever's in the (optional, collapsed-by-default) stdin box --
+        // there's no live/interactive stdin since each command is a fresh,
+        // non-interactive sandbox job that runs to completion before
+        // returning (see this file's own header comment and
+        // learnRunner.js's execCommand()), so a program that calls
+        // scanf()/getchar() needs its input supplied up front instead.
+        const stdin = this.stdinInput ? this.stdinInput.value : '';
+        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, stdin, this.sessionBinaries);
         this.setBusy(false);
 
         if (result.stdout) this.appendLine(result.stdout.replace(/\n$/, ''), 'stdout');

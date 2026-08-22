@@ -206,7 +206,7 @@ export class SidebarUI {
         // Rename/Delete menu -- same pattern as file rows, but operating on
         // every file under this folder's path prefix (see FileSystemBloc).
         const actionsDiv = document.createElement('div');
-        actionsDiv.className = "relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0";
+        actionsDiv.className = "relative flex items-center opacity-40 group-hover:opacity-100 transition-opacity flex-shrink-0";
 
         const menuBtn = document.createElement('button');
         menuBtn.innerHTML = `
@@ -301,8 +301,14 @@ export class SidebarUI {
         `;
         div.appendChild(nameContainer);
 
+        // Resting opacity is 40%, not 0 -- a real reported bug: with 0 the
+        // menu button only existed (clickably) during an active :hover, so
+        // a mouse that so much as twitched between hovering and clicking
+        // could miss it entirely and land back on the row (selectFile()),
+        // reading as "Delete doesn't work." 40% keeps it always clickable
+        // while still dimmer than the fully-opaque hover state.
         const actionsDiv = document.createElement('div');
-        actionsDiv.className = "relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity";
+        actionsDiv.className = "relative flex items-center opacity-40 group-hover:opacity-100 transition-opacity";
 
         const menuBtn = document.createElement('button');
         menuBtn.innerHTML = `
