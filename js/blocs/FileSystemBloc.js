@@ -313,13 +313,28 @@ export class FileSystemBloc extends Bloc {
         }
     }
 
-    async saveProjectToCloud(db, user, currentEditorContent) {
+    // `getEditorContent` -- a FUNCTION, not a plain string -- so it can be
+    // called twice: once now, for the Firestore payload, and once again
+    // fresh after the write completes, for the local state sync. A real
+    // reported bug without the second read: the Firestore write is a
+    // real, unbounded-latency network round-trip, and if the student
+    // resumed typing while it was in flight, reusing the pre-write
+    // snapshot for the local virtualFS update afterward made
+    // EditorUI.render()'s stale-content check see the live editor
+    // disagree with it and call Monaco's setValue() -- which unconditionally
+    // resets the cursor to the top of the file (and reverts the newer
+    // keystrokes) regardless of whether the content it's setting even
+    // differs. Intermittent by nature (only when the student types again
+    // before the network call finishes), which is exactly how it was
+    // reported: "a veces... me devuelve al top".
+    async saveProjectToCloud(db, user, getEditorContent) {
         if (!user) return;
         try {
-            // Sync editor content into what gets saved...
+            const readContent = () => typeof getEditorContent === 'function' ? getEditorContent() : getEditorContent;
+            const snapshotContent = readContent();
             const fsToSave = { ...this.state.virtualFS };
-            if (this.state.currentFile && currentEditorContent !== undefined) {
-                fsToSave[this.state.currentFile] = currentEditorContent;
+            if (this.state.currentFile && snapshotContent !== undefined) {
+                fsToSave[this.state.currentFile] = snapshotContent;
             }
 
             globalEventBus.emit('LOG', { message: "Saving project to cloud...", type: 'warn' });
@@ -334,15 +349,15 @@ export class FileSystemBloc extends Bloc {
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
                 [this.cloudField]: fsToSave
             }, { merge: true });
-            // ...AND into this.state.virtualFS itself, in the same emit as
-            // projectType/projectName below -- not just the local fsToSave
-            // copy used for the write above. A real reported bug without
-            // this: the emit still notifies EditorUI's render()/
-            // renderPlayground(), whose stale-content self-heal check saw
-            // the (unpatched) old virtualFS disagree with the live editor
-            // content and reverted the editor right back -- SAVE CLOUD was
-            // erasing the very edit it had just saved to Firestore.
-            this.emit({ virtualFS: fsToSave, projectType: 'cloud', projectName: user.email, projectId: null });
+
+            // Re-read fresh here, not the snapshot above -- see this
+            // method's header comment.
+            const freshContent = readContent();
+            const virtualFSNow = { ...this.state.virtualFS };
+            if (this.state.currentFile && freshContent !== undefined) {
+                virtualFSNow[this.state.currentFile] = freshContent;
+            }
+            this.emit({ virtualFS: virtualFSNow, projectType: 'cloud', projectName: user.email, projectId: null });
             globalEventBus.emit('LOG', { message: "Project saved successfully!", type: 'success' });
         } catch (error) {
             globalEventBus.emit('LOG', { message: "Error saving project: " + error.message, type: 'error' });

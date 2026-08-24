@@ -24,6 +24,24 @@ export class AuthBloc extends Bloc {
             // eslint-disable-next-line no-undef
             const db = firebase.firestore();
 
+            // SESSION, not Firebase's own default (browserLocalPersistence,
+            // which survives closing the browser entirely -- indefinitely,
+            // until an explicit logout). A real reported concern: this app
+            // runs on shared lab computers, and a student who forgets to
+            // click LOGOUT would leave their account signed in for whoever
+            // opens the browser next, with full access to their saved
+            // projects and Learn progress. SESSION persistence clears once
+            // this tab/window closes, so the next person starts logged out
+            // -- normal reload/navigation within the same session is
+            // unaffected. Set before onAuthStateChanged() below so the very
+            // first state check already respects it: per Firebase's own
+            // docs, calling this also downgrades an already-restored LOCAL
+            // session to session-only going forward, so it takes effect
+            // even for a browser that already had a lingering login before
+            // this shipped, without forcing an immediate logout.
+            // eslint-disable-next-line no-undef
+            await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+
             // Tracks the signed-in uid so we only fire AUTH_LOGIN once per
             // actual sign-in (onAuthStateChanged can re-fire for the same user).
             let lastUid = null;

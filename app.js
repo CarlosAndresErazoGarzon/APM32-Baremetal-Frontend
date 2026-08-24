@@ -204,12 +204,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const cloudLoadBtn = document.getElementById('cloudLoadBtn');
             const cloudSaveBtn = document.getElementById('cloudSaveBtn');
             if(cloudLoadBtn) cloudLoadBtn.onclick = () => fsBloc.loadProjectFromCloud(state.db, state.user);
-            if(cloudSaveBtn) cloudSaveBtn.onclick = () => fsBloc.saveProjectToCloud(state.db, state.user, editorUI.getContent());
+            if(cloudSaveBtn) cloudSaveBtn.onclick = () => fsBloc.saveProjectToCloud(state.db, state.user, () => editorUI.getContent());
 
             const playgroundCloudLoadBtn = document.getElementById('playgroundCloudLoadBtn');
             const playgroundCloudSaveBtn = document.getElementById('playgroundCloudSaveBtn');
             if(playgroundCloudLoadBtn) playgroundCloudLoadBtn.onclick = () => playgroundFsBloc.loadProjectFromCloud(state.db, state.user);
-            if(playgroundCloudSaveBtn) playgroundCloudSaveBtn.onclick = () => playgroundFsBloc.saveProjectToCloud(state.db, state.user, editorUI.getContent());
+            if(playgroundCloudSaveBtn) playgroundCloudSaveBtn.onclick = () => playgroundFsBloc.saveProjectToCloud(state.db, state.user, () => editorUI.getContent());
         }
     });
 

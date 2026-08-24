@@ -67,7 +67,7 @@ export class AutoSaveUI {
 
         clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
-            this.fsBloc.saveProjectToCloud(db, user, this.getEditorContent());
+            this.fsBloc.saveProjectToCloud(db, user, this.getEditorContent);
         }, DEBOUNCE_MS);
     }
 }
