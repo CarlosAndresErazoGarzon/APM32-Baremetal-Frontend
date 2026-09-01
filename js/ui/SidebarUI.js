@@ -5,6 +5,15 @@ const FOLDER_ICON = `<svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" 
 // Exported: LevelListUI reuses this exact chevron for the unit tree's own
 // expand/collapse, so both trees in the app share one expand affordance.
 export const CHEVRON_ICON = `<svg class="w-3 h-3 flex-shrink-0 transition-transform duration-150" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 20 20"><path stroke-linecap="round" stroke-linejoin="round" d="M7 5l6 5-6 5"></path></svg>`;
+// Exported: the "this row is selected" mark both trees use -- RIGHT-side
+// corner marks only, since the left edge already carries its own signal
+// (a border-l-2 accent bar, set alongside this on whichever element uses
+// it). Caller must set that element's `position: relative` for these to
+// anchor to it rather than an ancestor.
+export const CORNER_MARKS_RIGHT = `
+    <svg width="8" height="8" viewBox="0 0 8 8" class="pointer-events-none" style="position:absolute; top:1px; right:1px;"><path d="M1 0.5 L7.5 0.5 L7.5 7" fill="none" stroke="var(--accent-text)" stroke-width="1.25"/></svg>
+    <svg width="8" height="8" viewBox="0 0 8 8" class="pointer-events-none" style="position:absolute; bottom:1px; right:1px;"><path d="M1 7.5 L7.5 7.5 L7.5 1" fill="none" stroke="var(--accent-text)" stroke-width="1.25"/></svg>
+`;
 const FILE_ICON_PATH = `<path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"></path>`;
 // A little terminal window -- distinguishes compiled binaries (from
 // ConsoleUI's manual "gcc ... -o test") from real source files at a glance.
@@ -274,11 +283,15 @@ export class SidebarUI {
         div.style.paddingRight = '10px';
         div.onclick = () => this.fsBloc.selectFile(filename); // Toda el área es clickeable
 
-        // Aplicar estilos según estado activo -- flat fill, no inset shadow
+        // Aplicar estilos según estado activo -- a corner-bracket frame
+        // (added below) instead of a solid fill, so the active row reads
+        // as "selected" the same way the terminal's own tab bar (.ascii-tab)
+        // marks its active tab: an accent-colored mark, not a filled block.
         if (isActive) {
-            div.style.backgroundColor = "var(--active-bg)";
-            div.style.color = "var(--active-text)";
-            div.style.borderColor = "var(--active-border)";
+            div.style.backgroundColor = "transparent";
+            div.style.color = "var(--accent-text)";
+            div.style.borderColor = "var(--accent-text)";
+            div.style.position = "relative";
         } else {
             div.style.backgroundColor = "transparent";
             div.style.color = "var(--sidebar-text)";
@@ -300,6 +313,14 @@ export class SidebarUI {
             <span class="truncate font-medium tracking-wide">${displayName}</span>
         `;
         div.appendChild(nameContainer);
+
+        // Corner marks on the active row -- RIGHT side only. The left edge
+        // already has its own marker (the border-l-2 accent bar set above);
+        // mirroring it with brackets on that same side was redundant --
+        // two ways of saying "this side" at once.
+        if (isActive) {
+            div.insertAdjacentHTML('beforeend', CORNER_MARKS_RIGHT);
+        }
 
         // Resting opacity is 40%, not 0 -- a real reported bug: with 0 the
         // menu button only existed (clickably) during an active :hover, so
@@ -395,6 +416,21 @@ export class SidebarUI {
     // Flat bracketed text, not a colored pill -- matches the [OK]/[M01]
     // bracket convention used everywhere else instead of adding another
     // rounded/tinted badge surface.
+    //
+    // flex-shrink-0 matters here, not just cosmetic: this badge is a flex
+    // child sitting right above #fileTreeList in #sidebar's column, and it
+    // also has `truncate` (overflow:hidden) on itself. Per the flexbox
+    // spec, an item's "automatic minimum size" floor (the thing that
+    // normally stops a flex item shrinking below its own content) only
+    // applies when overflow is visible -- with overflow:hidden that floor
+    // drops to 0. So with enough files/folders to make the tree taller
+    // than the sidebar (which DOES have its own overflow-y-auto and is
+    // meant to just scroll internally), the browser was free to squash
+    // this badge down to a few px instead -- a real reported bug ("si
+    // abro varias carpetas no se puede ver la sección de proyecto"),
+    // confirmed via its computed height collapsing to ~5px in a repro
+    // with 15 files. flex-shrink-0 opts it out of that shrink entirely,
+    // same as the header row above it already does.
     updateProjectBadge(type, name) {
         if (!this.projectBadge) return;
         // Preserve 'hidden' across the reassignment below -- that class is
@@ -406,13 +442,13 @@ export class SidebarUI {
         const wasHidden = this.projectBadge.classList.contains('hidden');
         if (type === 'cloud') {
             this.projectBadge.innerText = `[ Project: ${name} ]`;
-            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
+            this.projectBadge.className = 'flex-shrink-0 mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
         } else if (type === 'example') {
             this.projectBadge.innerText = `[ Example: ${name} ]`;
-            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
+            this.projectBadge.className = 'flex-shrink-0 mx-3 mt-3 px-1 text-[9px] text-[var(--success-text)] font-bold uppercase tracking-wider truncate';
         } else {
             this.projectBadge.innerText = '[ Project: Scratchpad ]';
-            this.projectBadge.className = 'mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate';
+            this.projectBadge.className = 'flex-shrink-0 mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate';
         }
         if (wasHidden) this.projectBadge.classList.add('hidden');
     }

@@ -146,12 +146,57 @@ export class FileSystemBloc extends Bloc {
         this.emit({ binaryNames: names || [] });
     }
 
+    // The virtual filesystem has no separate "this is a folder" marker --
+    // folders in the tree (see SidebarUI.buildTree()) are purely derived
+    // from '/'-prefixes of virtualFS keys -- so nothing stopped a plain
+    // file and a same-named folder from coexisting. That's exactly what
+    // crashed the backend's job-dir writer with a raw, unhelpful "EEXIST
+    // ... mkdir '.../fun_est'" (a real reported bug): it tried to create
+    // "fun_est" as a real directory (to hold "fun_est/estructuras.c")
+    // while a plain file was already sitting at that exact path. These two
+    // checks are the two ways that collision can happen, shared by
+    // createFile/renameFile/renameFolder so it can't enter virtualFS from
+    // any of the three places a name changes.
+
+    // True if a folder already exists at exactly `name` -- i.e. some
+    // OTHER key already starts with "name/". Only relevant when `name`
+    // itself is about to become a plain file (createFile/renameFile);
+    // renameFolder merging into an already-partially-existing folder is
+    // fine and not this case.
+    folderExistsAt(name, virtualFS = this.state.virtualFS) {
+        const prefix = name + '/';
+        return Object.keys(virtualFS).some(f => f.startsWith(prefix));
+    }
+
+    // True (and returns the offending segment) if `name` itself, or any
+    // leading path segment of it, already exists as a plain file --
+    // either way `name` can't become (or be nested under) a folder
+    // without colliding with a file at that slot.
+    fileBlockingPath(name, virtualFS = this.state.virtualFS) {
+        const parts = name.split('/');
+        let prefix = '';
+        for (const part of parts) {
+            prefix = prefix ? `${prefix}/${part}` : part;
+            if (virtualFS[prefix] !== undefined) return prefix;
+        }
+        return null;
+    }
+
     createFile(filename) {
         if (this.state.virtualFS[filename]) {
             globalEventBus.emit('LOG', { message: 'File already exists!', type: 'error' });
             return false;
         }
-        
+        if (this.folderExistsAt(filename)) {
+            globalEventBus.emit('LOG', { message: `"${filename}" already exists as a folder.`, type: 'error' });
+            return false;
+        }
+        const blocker = this.fileBlockingPath(filename);
+        if (blocker) {
+            globalEventBus.emit('LOG', { message: `"${blocker}" already exists as a file, not a folder.`, type: 'error' });
+            return false;
+        }
+
         const newFS = { ...this.state.virtualFS };
         newFS[filename] = `// New file: ${filename}\n`;
         
@@ -181,6 +226,15 @@ export class FileSystemBloc extends Bloc {
             globalEventBus.emit('LOG', { message: 'File name already taken!', type: 'error' });
             return false;
         }
+        if (this.folderExistsAt(newName)) {
+            globalEventBus.emit('LOG', { message: `"${newName}" already exists as a folder.`, type: 'error' });
+            return false;
+        }
+        const blocker = this.fileBlockingPath(newName);
+        if (blocker && blocker !== oldName) {
+            globalEventBus.emit('LOG', { message: `"${blocker}" already exists as a file, not a folder.`, type: 'error' });
+            return false;
+        }
 
         const newFS = { ...this.state.virtualFS };
         // Si hay un contenido actual en el editor antes de renombrar, lo usamos en lugar del viejo virtualFS
@@ -202,6 +256,18 @@ export class FileSystemBloc extends Bloc {
         const newPrefix = newPath + '/';
         const affected = Object.keys(this.state.virtualFS).filter(f => f.startsWith(prefix));
         if (affected.length === 0) return false;
+
+        // newPath itself (or one of ITS OWN ancestor segments) already
+        // being a plain file is the folder-vs-file collision -- newPath
+        // partially already existing AS A FOLDER (some unrelated file
+        // already under newPath/) is fine, that's just merging into it,
+        // which the `collision` check right below already guards for
+        // leaf-name clashes.
+        const blocker = this.fileBlockingPath(newPath);
+        if (blocker) {
+            globalEventBus.emit('LOG', { message: `"${blocker}" already exists as a file, not a folder.`, type: 'error' });
+            return false;
+        }
 
         const collision = affected.some(f => this.state.virtualFS[newPrefix + f.slice(prefix.length)] !== undefined);
         if (collision) {
@@ -313,51 +379,52 @@ export class FileSystemBloc extends Bloc {
         }
     }
 
-    // `getEditorContent` -- a FUNCTION, not a plain string -- so it can be
-    // called twice: once now, for the Firestore payload, and once again
-    // fresh after the write completes, for the local state sync. A real
-    // reported bug without the second read: the Firestore write is a
-    // real, unbounded-latency network round-trip, and if the student
-    // resumed typing while it was in flight, reusing the pre-write
-    // snapshot for the local virtualFS update afterward made
-    // EditorUI.render()'s stale-content check see the live editor
-    // disagree with it and call Monaco's setValue() -- which unconditionally
-    // resets the cursor to the top of the file (and reverts the newer
-    // keystrokes) regardless of whether the content it's setting even
-    // differs. Intermittent by nature (only when the student types again
-    // before the network call finishes), which is exactly how it was
-    // reported: "a veces... me devuelve al top".
-    async saveProjectToCloud(db, user, getEditorContent) {
+    // state.virtualFS[state.currentFile] is the payload straight-up --
+    // EditorUI pushes every keystroke into it synchronously (see
+    // EditorUI.js), so it never lags the live editor while this bloc's mode
+    // is active. That used to not be true (a debounced sync left a window
+    // where a snapshot read here could go stale mid-write, requiring this
+    // method to read the editor twice -- once for the payload, once again
+    // after the network round-trip finished -- to avoid clobbering newer
+    // keystrokes with the pre-write snapshot); now that the sync is
+    // immediate, state.virtualFS is already whatever's newest at every
+    // point, including after this write's own (unbounded-latency) round
+    // trip completes, so there's nothing left to re-read or reconcile.
+    async saveProjectToCloud(db, user) {
         if (!user) return;
         try {
-            const readContent = () => typeof getEditorContent === 'function' ? getEditorContent() : getEditorContent;
-            const snapshotContent = readContent();
             const fsToSave = { ...this.state.virtualFS };
-            if (this.state.currentFile && snapshotContent !== undefined) {
-                fsToSave[this.state.currentFile] = snapshotContent;
-            }
 
             globalEventBus.emit('LOG', { message: "Saving project to cloud...", type: 'warn' });
-            // merge: true is load-bearing -- this document has sibling fields
-            // (`project`, `playgroundProject`, `learnProgress`) written by
-            // other blocs; a plain .set() here would wipe whichever of those
-            // this particular FileSystemBloc instance doesn't own.
+            // { merge: true } (bare, no field list) is NOT what this needs,
+            // and used to be a real reported bug: renaming or deleting a
+            // file, then saving, left the old filename alive in the cloud
+            // forever -- it would come back (alongside the new one) on the
+            // next login. Firestore's plain merge:true recurses INTO nested
+            // map fields (this document's `project`/`playgroundProject` are
+            // both nested maps of filepath -> content) and merges them
+            // key-by-key against whatever's already stored; a key that's
+            // simply absent from this write (the renamed/deleted file) is
+            // "not mentioned", not "delete this", so it never actually goes
+            // away server-side even though the client moved on.
+            //
+            // { mergeFields: [...] } is the fix, not just a variant spelling
+            // -- naming this document's OWN top-level fields tells Firestore
+            // to protect sibling fields this bloc doesn't own (`project` vs
+            // `playgroundProject` vs `learnProgress`, still written by other
+            // FileSystemBloc/LearnBloc instances) exactly like merge:true
+            // did, but REPLACE each named field's value wholesale instead of
+            // recursing into it -- so fsToSave here fully overwrites the
+            // stored map, and a removed key actually stays removed.
             // eslint-disable-next-line no-undef
             await db.collection("users").doc(user.uid).set({
                 email: user.email,
                 // eslint-disable-next-line no-undef
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
                 [this.cloudField]: fsToSave
-            }, { merge: true });
+            }, { mergeFields: ['email', 'lastUpdated', this.cloudField] });
 
-            // Re-read fresh here, not the snapshot above -- see this
-            // method's header comment.
-            const freshContent = readContent();
-            const virtualFSNow = { ...this.state.virtualFS };
-            if (this.state.currentFile && freshContent !== undefined) {
-                virtualFSNow[this.state.currentFile] = freshContent;
-            }
-            this.emit({ virtualFS: virtualFSNow, projectType: 'cloud', projectName: user.email, projectId: null });
+            this.emit({ projectType: 'cloud', projectName: user.email, projectId: null });
             globalEventBus.emit('LOG', { message: "Project saved successfully!", type: 'success' });
         } catch (error) {
             globalEventBus.emit('LOG', { message: "Error saving project: " + error.message, type: 'error' });

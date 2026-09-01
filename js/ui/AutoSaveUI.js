@@ -24,10 +24,9 @@ const DEBOUNCE_MS = 2500;
  * holds -- a real bug found while wiring up the Playground instance.
  */
 export class AutoSaveUI {
-    constructor(authBloc, fsBloc, editorGetter, modeBloc, mode, ids) {
+    constructor(authBloc, fsBloc, modeBloc, mode, ids) {
         this.authBloc = authBloc;
         this.fsBloc = fsBloc;
-        this.getEditorContent = editorGetter;
         this.modeBloc = modeBloc;
         this.mode = mode;
         // IDE keeps the original unscoped key so nobody's already-set
@@ -67,7 +66,7 @@ export class AutoSaveUI {
 
         clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
-            this.fsBloc.saveProjectToCloud(db, user, this.getEditorContent);
+            this.fsBloc.saveProjectToCloud(db, user);
         }, DEBOUNCE_MS);
     }
 }

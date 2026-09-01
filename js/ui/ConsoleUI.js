@@ -28,11 +28,10 @@
  * sandbox's shell actually has installed.
  */
 export class ConsoleUI {
-    constructor(playgroundBloc, playgroundFsBloc, apiUrl, editorGetter) {
+    constructor(playgroundBloc, playgroundFsBloc, apiUrl) {
         this.playgroundBloc = playgroundBloc;
         this.playgroundFsBloc = playgroundFsBloc;
         this.apiUrl = apiUrl;
-        this.getEditorContent = editorGetter;
         this.sessionBinaries = {};
 
         this.output = document.getElementById('consoleOutput');
@@ -74,19 +73,6 @@ export class ConsoleUI {
             this.clearBtn.onclick = () => {
                 this.output.innerHTML = '';
                 this.sessionBinaries = {};
-                // Sync the live editor content into virtualFS BEFORE the
-                // state change below -- same reason execute() does it (see
-                // that method's own comment): setBinaryNames() emits, which
-                // notifies EditorUI.renderPlayground(), and its cloud-load
-                // "self-heal" check can't tell "unsynced in-progress typing"
-                // apart from "a stale cloud copy" -- it saw them disagree
-                // and reverted the editor, silently discarding whatever was
-                // just typed. Confirmed as a real reported bug: pressing
-                // Clear on the terminal was erasing unsaved edits.
-                const state = this.playgroundFsBloc.state;
-                if (state.currentFile) {
-                    this.playgroundFsBloc.updateFileContent(state.currentFile, this.getEditorContent());
-                }
                 this.playgroundFsBloc.setBinaryNames([]);
             };
         }
@@ -116,21 +102,12 @@ export class ConsoleUI {
         this.input.value = '';
         this.setBusy(true);
 
-        // virtualFS only gets the current file's latest text on a file
-        // SWITCH (see EditorUI.renderPlayground()), not on every keystroke
-        // -- so patch it into `files` for this request AND persist it into
-        // the bloc itself. Skipping the persist was a real, reported bug: a
-        // stray emit right after this (e.g. setBinaryNames() below, fired
-        // by nothing more than "gcc main.c -o test" producing a binary)
-        // made renderPlayground() see the editor/virtualFS disagree and
-        // "self-heal" the editor back to the stale content -- silently
-        // reverting whatever was just typed to the Playground seed.
+        // virtualFS always holds the current file's latest text already --
+        // EditorUI pushes every keystroke into the bloc synchronously (see
+        // EditorUI.js) -- so the live file manager state is exactly what
+        // this request should be seeded from.
         const state = this.playgroundFsBloc.state;
         const files = { ...state.virtualFS };
-        if (state.currentFile) {
-            files[state.currentFile] = this.getEditorContent();
-            this.playgroundFsBloc.updateFileContent(state.currentFile, files[state.currentFile]);
-        }
 
         // Whatever's in the (optional, collapsed-by-default) stdin box --
         // there's no live/interactive stdin since each command is a fresh,

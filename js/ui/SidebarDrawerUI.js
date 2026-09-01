@@ -12,8 +12,10 @@ export class SidebarDrawerUI {
         this.sidebar = document.getElementById('sidebar');
         this.mobileMenuBtn = document.getElementById('mobileMenuBtn');
         this.sidebarOverlay = document.getElementById('sidebarOverlay');
+        this.nav = document.querySelector('nav');
 
         this.initEventListeners();
+        this.applyNavOffset();
     }
 
     initEventListeners() {
@@ -37,6 +39,45 @@ export class SidebarDrawerUI {
                 this.toggle(false);
             }
         }
+
+        // <nav>'s own height isn't constant: below the 'lg' breakpoint it
+        // wraps into 2-3 rows (mode tabs, login row), AND its ASCII-art
+        // title (BrandingUI.js) loads asynchronously and can change nav's
+        // height again well after first paint. #sidebar is position:fixed
+        // top:0 there too -- same top-left corner as <nav>, which sits
+        // above it (z-60 vs z-50) -- so without this, <nav> visually
+        // covers #sidebar's own header (title, "+", the settings gear)
+        // completely on any sub-1024px viewport (a real, confirmed bug,
+        // not just theoretical -- verified via screenshot: the sidebar's
+        // "+" button was there in the DOM and clickable by ID, just never
+        // visible or reachable by an actual click). A ResizeObserver on
+        // <nav> catches every case (window resize AND the async font
+        // swap) with one mechanism instead of re-deriving this in several
+        // places.
+        if (this.nav && window.ResizeObserver) {
+            new ResizeObserver(() => this.applyNavOffset()).observe(this.nav);
+        }
+        window.addEventListener('resize', () => this.applyNavOffset());
+    }
+
+    // Pushes #sidebar (and its overlay) down to start right below <nav>'s
+    // actual rendered height instead of at the viewport's true top:0 --
+    // only below the 'lg' breakpoint, where #sidebar is fixed and
+    // overlaps <nav> in the first place. At 'lg'+ #sidebar is `relative`
+    // and already sits beside <nav> in normal flow, so any leftover
+    // inline offset from a narrower width has to be cleared, not just left at 0.
+    applyNavOffset() {
+        if (!this.sidebar) return;
+
+        if (window.innerWidth >= 1024) {
+            this.sidebar.style.top = '';
+            this.sidebar.style.height = '';
+            return;
+        }
+
+        const navHeight = this.nav ? this.nav.getBoundingClientRect().height : 0;
+        this.sidebar.style.top = `${navHeight}px`;
+        this.sidebar.style.height = `calc(100% - ${navHeight}px)`;
     }
 
     // No border classes here on purpose -- the sidebar is borderless now

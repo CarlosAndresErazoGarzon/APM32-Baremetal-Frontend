@@ -15,6 +15,7 @@ import { PlaygroundBloc } from './js/blocs/PlaygroundBloc.js';
 import { AuthUI } from './js/ui/AuthUI.js';
 import { SidebarUI } from './js/ui/SidebarUI.js';
 import { SidebarDrawerUI } from './js/ui/SidebarDrawerUI.js';
+import { SidebarSettingsUI } from './js/ui/SidebarSettingsUI.js';
 import { EditorUI } from './js/ui/EditorUI.js';
 import { TerminalUI } from './js/ui/TerminalUI.js';
 import { SerialUI } from './js/ui/SerialUI.js';
@@ -69,14 +70,15 @@ document.addEventListener('DOMContentLoaded', () => {
         exampleSelector: null
     });
     const sidebarDrawerUI = new SidebarDrawerUI();
+    const sidebarSettingsUI = new SidebarSettingsUI();
     const terminalUI = new TerminalUI(compilerBloc, fsBloc, dapBloc, CONFIG.API_URL, modeBloc);
     const serialUI = new SerialUI(serialBloc);
     const docsUI = new DocsUI();
     const hardwareUI = new HardwareUI(dapBloc);
-    const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, () => editorUI.getContent(), modeBloc, 'ide', {
+    const autoSaveUI = new AutoSaveUI(authBloc, fsBloc, modeBloc, 'ide', {
         wrapper: 'autoSaveWrapper', checkbox: 'autoSaveToggle', storageKey: 'apm32_autosave_enabled'
     });
-    const playgroundAutoSaveUI = new AutoSaveUI(authBloc, playgroundFsBloc, () => editorUI.getContent(), modeBloc, 'playground', {
+    const playgroundAutoSaveUI = new AutoSaveUI(authBloc, playgroundFsBloc, modeBloc, 'playground', {
         wrapper: 'playgroundAutoSaveWrapper', checkbox: 'playgroundAutoSaveToggle', storageKey: 'apm32_autosave_enabled_playground'
     });
     const modeSwitcherUI = new ModeSwitcherUI(modeBloc);
@@ -85,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const theoryUI = new TheoryUI(learnBloc);
     const testResultsUI = new TestResultsUI();
     const runUI = new RunUI(learnBloc, CONFIG.API_URL, () => editorUI.getContent());
-    const consoleUI = new ConsoleUI(playgroundBloc, playgroundFsBloc, CONFIG.API_URL, () => editorUI.getContent());
+    const consoleUI = new ConsoleUI(playgroundBloc, playgroundFsBloc, CONFIG.API_URL);
 
     // 3. System Initialization
     initBrandingTitle();
@@ -171,25 +173,14 @@ document.addEventListener('DOMContentLoaded', () => {
         learnBloc.loadProgressFromCloud(db, user);
     });
 
-    // Local persistence for IDE/Playground -- reported bug: reloading the
-    // page always lost unsaved work, since FileSystemBloc only wrote to
-    // localStorage on a file SWITCH or an explicit save, never on plain
-    // typing. Debounced (not per-keystroke) the same way AutoSaveUI
-    // debounces its cloud save. Mode-gated for the same reason AutoSaveUI's
-    // save is: the Monaco editor is shared across all three modes and
-    // fires this event regardless of which one is active.
-    let localSyncTimer = null;
-    globalEventBus.on('EDITOR_CONTENT_CHANGED', () => {
-        clearTimeout(localSyncTimer);
-        localSyncTimer = setTimeout(() => {
-            const mode = modeBloc.state.mode;
-            if (mode === 'ide' && fsBloc.state.currentFile) {
-                fsBloc.updateFileContent(fsBloc.state.currentFile, editorUI.getContent());
-            } else if (mode === 'playground' && playgroundFsBloc.state.currentFile) {
-                playgroundFsBloc.updateFileContent(playgroundFsBloc.state.currentFile, editorUI.getContent());
-            }
-        }, 800);
-    });
+    // Local persistence for IDE/Playground/Learn: no longer needs wiring
+    // here at all. EditorUI.onDidChangeModelContent now pushes every
+    // keystroke straight into the active mode's bloc synchronously (see
+    // EditorUI.js), and each FileSystemBloc mirrors its own state to
+    // localStorage on every emit (persistLocal(), via the subscribe() in
+    // its constructor) -- so there's nothing left for this event to do on
+    // the local-persistence side. It still fires (see EditorUI.js) purely
+    // for AutoSaveUI's own debounced cloud-save scheduling below.
 
     // A test just passed (LearnBloc.runTests) -- push progress to the
     // user's account if they're logged in. Silently does nothing otherwise,
@@ -204,12 +195,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const cloudLoadBtn = document.getElementById('cloudLoadBtn');
             const cloudSaveBtn = document.getElementById('cloudSaveBtn');
             if(cloudLoadBtn) cloudLoadBtn.onclick = () => fsBloc.loadProjectFromCloud(state.db, state.user);
-            if(cloudSaveBtn) cloudSaveBtn.onclick = () => fsBloc.saveProjectToCloud(state.db, state.user, () => editorUI.getContent());
+            if(cloudSaveBtn) cloudSaveBtn.onclick = () => fsBloc.saveProjectToCloud(state.db, state.user);
 
             const playgroundCloudLoadBtn = document.getElementById('playgroundCloudLoadBtn');
             const playgroundCloudSaveBtn = document.getElementById('playgroundCloudSaveBtn');
             if(playgroundCloudLoadBtn) playgroundCloudLoadBtn.onclick = () => playgroundFsBloc.loadProjectFromCloud(state.db, state.user);
-            if(playgroundCloudSaveBtn) playgroundCloudSaveBtn.onclick = () => playgroundFsBloc.saveProjectToCloud(state.db, state.user, () => editorUI.getContent());
+            if(playgroundCloudSaveBtn) playgroundCloudSaveBtn.onclick = () => playgroundFsBloc.saveProjectToCloud(state.db, state.user);
         }
     });
 

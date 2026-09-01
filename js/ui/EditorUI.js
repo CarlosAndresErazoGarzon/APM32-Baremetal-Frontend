@@ -11,12 +11,52 @@ export class EditorUI {
         this.themeToggleBtn = document.getElementById('themeToggle');
         this.themeIcon = document.getElementById('themeIcon');
 
-        // Internal state trackers to avoid infinite loops on update -- one per
-        // mode, since IDE/Learn/Playground each track "what's currently
-        // loaded" independently of each other.
-        this.lastRenderedFile = null;
-        this.lastRenderedLevelId = null;
-        this.lastRenderedPlaygroundFile = null;
+        // One declarative entry per mode instead of a render*()/onEdit
+        // method pair and a lastRendered* field hand-written for each --
+        // adding a mode later means adding one entry here, not touching
+        // initEditor(), onModeChange() and renderMode() itself.
+        //   getKey      -- identity of "what's loaded" (filename, exercise id...)
+        //   getContent  -- the authoritative text for that key, from the bloc's state
+        //   getLanguage -- Monaco language id for that key
+        //   onEdit      -- called on every keystroke while this mode is active;
+        //                  must write straight into the bloc synchronously (no
+        //                  debounce) so getContent() never lags the live buffer --
+        //                  see renderMode()'s contentChanged comment for why.
+        this.modes = {
+            ide: {
+                bloc: fsBloc,
+                getKey: s => s.currentFile,
+                getContent: s => s.virtualFS[s.currentFile] || '',
+                getLanguage: s => s.currentFile && s.currentFile.endsWith('.h') ? 'cpp' : 'c',
+                onEdit: (content, s) => { if (s.currentFile) fsBloc.updateFileContent(s.currentFile, content); }
+            },
+            learn: {
+                bloc: learnBloc,
+                getKey: s => (s.currentTopicId && s.currentExerciseId)
+                    ? `${s.currentTopicId}/${s.currentExerciseId}`
+                    : (s.currentLevelId || null),
+                getContent: s => s.code || '',
+                getLanguage: () => 'c', // Learn levels are always plain host C
+                // Direct mutation, no emit() -- nothing besides this UI needs
+                // to know about every keystroke, so skip the notify/render
+                // round-trip entirely instead of relying on renderMode()'s
+                // reentrancy guard to no-op it.
+                onEdit: (content) => { learnBloc.state.code = content; learnBloc.saveDraft(); }
+            }
+        };
+        if (playgroundFsBloc) {
+            this.modes.playground = {
+                bloc: playgroundFsBloc,
+                getKey: s => s.currentFile,
+                getContent: s => s.virtualFS[s.currentFile] || '',
+                getLanguage: s => s.currentFile && s.currentFile.endsWith('.h') ? 'cpp' : 'c',
+                onEdit: (content, s) => { if (s.currentFile) playgroundFsBloc.updateFileContent(s.currentFile, content); }
+            };
+        }
+        // "What's currently loaded" per mode, and a reentrancy guard per
+        // mode -- keyed by mode name instead of one field/flag per mode.
+        this.lastRendered = {};
+        this._renderGuards = {};
 
         // The page's actual theming is driven by a single `light-theme` class on
         // <body> (see the CSS custom properties in index.html: --sidebar-bg,
@@ -108,12 +148,19 @@ export class EditorUI {
         });
 
         this.editor.onDidChangeModelContent(() => {
-            if (this.modeBloc.state.mode === 'learn') {
-                // Direct mutation, no emit() -- same anti-render-loop pattern
-                // used for the IDE's virtualFS below.
-                this.learnBloc.state.code = this.editor.getValue();
-                this.learnBloc.saveDraft();
-            }
+            // Push every keystroke into the active mode's bloc immediately --
+            // no debounce. This is what makes each mode's getContent() always
+            // agree with the live buffer for the currently-loaded key, which
+            // is what renderMode()'s contentChanged check relies on to tell
+            // "external change" apart from "my own unsynced typing". A
+            // debounced version of this used to live in app.js and was the
+            // actual cause of a reported bug: any unrelated bloc emit that
+            // landed inside that debounce's window (e.g. deleting a
+            // different file) made renderMode() see the live buffer and the
+            // bloc disagree and "self-heal" the editor, silently discarding
+            // whatever had just been typed.
+            const cfg = this.modes[this.modeBloc.state.mode];
+            if (cfg) cfg.onEdit(this.editor.getValue(), cfg.bloc.state);
             globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         });
 
@@ -123,17 +170,16 @@ export class EditorUI {
         // covers both.
         globalEventBus.on('COMPILER_ERRORS', ({ markers }) => this.applyMarkers(markers));
 
-        // Subscribe to FileSystem changes to update editor content
-        this.fsBloc.subscribe(this.render.bind(this));
-        this.learnBloc.subscribe(this.renderLearn.bind(this));
-        if (this.playgroundFsBloc) {
-            this.playgroundFsBloc.subscribe(this.renderPlayground.bind(this));
-        }
+        // Subscribe every mode's bloc to the one generic renderer. Bloc's own
+        // subscribe() calls back immediately with the current state, and
+        // renderMode()'s own `modeBloc.state.mode !== modeName` guard makes
+        // only the initially-active mode actually render anything from that.
+        Object.entries(this.modes).forEach(([name, cfg]) => {
+            cfg.bloc.subscribe(state => this.renderMode(name, state));
+        });
         // On a mode switch, force whichever side is becoming active to reload
         // its content into the editor (the editor currently holds the OTHER
-        // mode's text) and mark the other sides' "last shown" as stale so
-        // they don't try to write that leftover text back into their own
-        // state.
+        // mode's text) by marking its "last shown" as stale.
         this.modeBloc.subscribe(this.onModeChange.bind(this));
     }
 
@@ -165,127 +211,50 @@ export class EditorUI {
 
     onModeChange(modeState) {
         if (!this.editor) return;
+        const cfg = this.modes[modeState.mode];
+        if (!cfg) return;
 
-        // Force a fresh reload on whichever side is becoming active (the
-        // editor currently holds one of the OTHER two modes' text) and mark
-        // the other two's "last shown" as stale so they don't mistake this
-        // leftover text for their own and write it back into their state.
-        if (modeState.mode === 'ide') {
-            this.lastRenderedFile = null;
-            this.render(this.fsBloc.state);
-        } else if (modeState.mode === 'learn') {
-            this.lastRenderedLevelId = null;
-            this.renderLearn(this.learnBloc.state);
-        } else if (modeState.mode === 'playground' && this.playgroundFsBloc) {
-            this.lastRenderedPlaygroundFile = null;
-            this.renderPlayground(this.playgroundFsBloc.state);
-        }
+        // Force a fresh reload on whichever side is becoming active -- the
+        // editor currently holds one of the OTHER modes' text, so the
+        // key-vs-content comparison in renderMode() would otherwise see a
+        // "content changed" false-positive against a key that never
+        // actually changed for this mode.
+        this.lastRendered[modeState.mode] = null;
+        this.renderMode(modeState.mode, cfg.bloc.state);
     }
 
-    render(state) {
-        if (!this.editor || this.modeBloc.state.mode !== 'ide') return;
-        // Guard against re-entrant calls (prevents infinite loops)
-        if (this._isRendering) return;
-        this._isRendering = true;
+    // Single renderer shared by every mode in `this.modes` (see the
+    // constructor). Each mode only differs in how it reads its key/content/
+    // language and what a keystroke does to its bloc -- everything else
+    // (the reentrancy guard, the reload logic) is identical, so it lives
+    // here once instead of once per mode.
+    renderMode(modeName, state) {
+        if (!this.editor || this.modeBloc.state.mode !== modeName) return;
+        const cfg = this.modes[modeName];
+        if (!cfg || this._renderGuards[modeName]) return; // guard against re-entrant calls
+        this._renderGuards[modeName] = true;
 
         try {
-            const fileChanged = this.lastRenderedFile !== state.currentFile;
-            // Same filename, but the content behind it changed underneath
-            // us (loadProjectFromCloud() landing on a project whose first
-            // file happens to share the CURRENTLY DISPLAYED file's name,
-            // e.g. both "main.c" -- fileChanged alone would stay false and
-            // silently leave the stale seed content on screen). Mirrors
-            // renderLearn()'s own codeChanged check below.
-            const contentChanged = !fileChanged && state.currentFile &&
-                this.editor.getValue() !== (state.virtualFS[state.currentFile] || '');
+            const key = cfg.getKey(state);
+            const keyChanged = this.lastRendered[modeName] !== key;
+            const liveContent = cfg.getContent(state);
+            // Same key, but the content behind it changed underneath us --
+            // e.g. loadProjectFromCloud() landing on a project whose first
+            // file happens to share the CURRENTLY DISPLAYED file's name.
+            // This can only mean a genuine external write: onDidChangeModelContent
+            // pushes every keystroke straight into the bloc synchronously
+            // (see initEditor()), so the bloc's own content never lags the
+            // live buffer as a side effect of the student's own typing.
+            const contentChanged = !keyChanged && key && this.editor.getValue() !== liveContent;
 
-            // Save current editor content to FS before switching files
-            // IMPORTANT: We write directly to state.virtualFS WITHOUT calling emit()
-            // to avoid triggering another render cycle (which would cause stack overflow).
-            if (fileChanged && this.lastRenderedFile && state.virtualFS[this.lastRenderedFile] !== undefined) {
-                state.virtualFS[this.lastRenderedFile] = this.editor.getValue();
-            }
-
-            // Load the new file content into the editor
-            if ((fileChanged || contentChanged) && state.currentFile) {
-                const content = state.virtualFS[state.currentFile] || '';
-                this.editor.setValue(content);
-
-                const isHeader = state.currentFile.endsWith('.h');
-                monaco.editor.setModelLanguage(this.editor.getModel(), isHeader ? 'cpp' : 'c');
-
-                // Clear any old compiler markers
-                this.applyMarkers([]);
-
-                this.lastRenderedFile = state.currentFile;
+            if (key && (keyChanged || contentChanged)) {
+                this.editor.setValue(liveContent);
+                monaco.editor.setModelLanguage(this.editor.getModel(), cfg.getLanguage(state));
+                this.applyMarkers([]); // clear any old compiler markers
+                this.lastRendered[modeName] = key;
             }
         } finally {
-            this._isRendering = false;
-        }
-    }
-
-    // Mirrors render() exactly (same virtualFS/currentFile state shape,
-    // since PlaygroundBloc's FileSystemBloc instance is the same class) --
-    // kept as its own method rather than parameterizing render() itself, to
-    // match the existing render()/renderLearn() pair instead of inventing a
-    // third pattern.
-    renderPlayground(state) {
-        if (!this.editor || this.modeBloc.state.mode !== 'playground') return;
-        if (this._isRenderingPlayground) return;
-        this._isRenderingPlayground = true;
-
-        try {
-            const fileChanged = this.lastRenderedPlaygroundFile !== state.currentFile;
-            // Same reasoning as render()'s own contentChanged -- a
-            // loadProjectFromCloud() landing on a project whose first file
-            // is also named "main.c" (Playground's own seed default, so
-            // this is the COMMON case here, not an edge case) would
-            // otherwise leave the stale seed content on screen since the
-            // filename itself never changes.
-            const contentChanged = !fileChanged && state.currentFile &&
-                this.editor.getValue() !== (state.virtualFS[state.currentFile] || '');
-
-            if (fileChanged && this.lastRenderedPlaygroundFile && state.virtualFS[this.lastRenderedPlaygroundFile] !== undefined) {
-                state.virtualFS[this.lastRenderedPlaygroundFile] = this.editor.getValue();
-            }
-
-            if ((fileChanged || contentChanged) && state.currentFile) {
-                const content = state.virtualFS[state.currentFile] || '';
-                this.editor.setValue(content);
-
-                const isHeader = state.currentFile.endsWith('.h');
-                monaco.editor.setModelLanguage(this.editor.getModel(), isHeader ? 'cpp' : 'c');
-
-                this.applyMarkers([]);
-
-                this.lastRenderedPlaygroundFile = state.currentFile;
-            }
-        } finally {
-            this._isRenderingPlayground = false;
-        }
-    }
-
-    renderLearn(state) {
-        if (!this.editor || this.modeBloc.state.mode !== 'learn') return;
-        if (this._isRenderingLearn) return;
-        this._isRenderingLearn = true;
-
-        try {
-            const currentKey = state.currentTopicId && state.currentExerciseId
-                ? `${state.currentTopicId}/${state.currentExerciseId}`
-                : (state.currentLevelId || null);
-
-            const levelChanged = this.lastRenderedLevelId !== currentKey;
-            const codeChanged = this.editor.getValue() !== (state.code || '');
-
-            if (currentKey && (levelChanged || codeChanged)) {
-                this.editor.setValue(state.code || '');
-                monaco.editor.setModelLanguage(this.editor.getModel(), 'c'); // Learn levels are always plain host C
-                this.applyMarkers([]);
-                this.lastRenderedLevelId = currentKey;
-            }
-        } finally {
-            this._isRenderingLearn = false;
+            this._renderGuards[modeName] = false;
         }
     }
 

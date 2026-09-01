@@ -1,6 +1,27 @@
 import { globalEventBus } from '../core/EventBus.js';
 import { toggleFlexVisible } from '../core/domUtils.js';
 
+// Renders the Telemetry column's Flash/RAM meters as a row of SVG
+// segments (a terminal VU-meter look) instead of one <div style="width:%">
+// bar -- genuinely easier to get right as SVG than as a %-width fill,
+// since each segment is an independent lit/unlit mark rather than one
+// element whose width has to be computed and animated.
+const METER_SEGMENTS = 25;
+const METER_SEG_WIDTH = 6;
+const METER_GAP = 2;
+
+function renderMeter(svgEl, percent) {
+    if (!svgEl) return;
+    const pitch = METER_SEG_WIDTH + METER_GAP;
+    const lit = Math.round((percent / 100) * METER_SEGMENTS);
+    let rects = '';
+    for (let i = 0; i < METER_SEGMENTS; i++) {
+        const fill = i < lit ? 'var(--success-text)' : 'var(--track-bg)';
+        rects += `<rect x="${i * pitch}" y="0" width="${METER_SEG_WIDTH}" height="6" style="fill:${fill}"></rect>`;
+    }
+    svgEl.innerHTML = rects;
+}
+
 export class TerminalUI {
     constructor(compilerBloc, fsBloc, dapBloc, apiUrl, modeBloc) {
         this.compilerBloc = compilerBloc;
@@ -39,6 +60,11 @@ export class TerminalUI {
         // overlapping click. This flag is how the COMPILER_STATUS handler
         // below knows not to re-enable it yet.
         this.isFlashing = false;
+
+        // Paint the meters' initial all-unlit state -- they're SVG now, so
+        // (unlike the old %-width div, empty-by-default in plain CSS)
+        // something has to actually render the 0% segments once up front.
+        this.updateResourceUsage(0, 0);
 
         this.initEventListeners();
         this.initTabSwitching();
@@ -264,9 +290,9 @@ export class TerminalUI {
         const ramBar = document.getElementById('ramUsageBar');
         const ramText = document.getElementById('ramUsageText');
 
-        if (flashBar) flashBar.style.width = flashPercent + '%';
+        renderMeter(flashBar, flashPercent);
         if (flashText) flashText.innerText = flashPercent + '%';
-        if (ramBar) ramBar.style.width = ramPercent + '%';
+        renderMeter(ramBar, ramPercent);
         if (ramText) ramText.innerText = ramPercent + '%';
     }
 

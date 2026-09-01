@@ -1,4 +1,4 @@
-import { CHEVRON_ICON } from './SidebarUI.js';
+import { CHEVRON_ICON, CORNER_MARKS_RIGHT } from './SidebarUI.js';
 
 const INDENT_PX = 16;
 
@@ -25,6 +25,13 @@ export class LevelListUI {
     constructor(learnBloc) {
         this.learnBloc = learnBloc;
         this.container = document.getElementById('levelListPane');
+
+        // UI-only visual state, same as SidebarUI's own collapsedFolders --
+        // independent of which unit is actually loaded (state.currentUnitId).
+        // Collapsing the current unit just hides its children list; it
+        // does NOT change what's loaded in the editor, same as collapsing
+        // a folder in the IDE's file tree never touches the active file.
+        this.collapsedUnits = new Set();
 
         this.learnBloc.subscribe(this.render.bind(this));
     }
@@ -74,8 +81,9 @@ export class LevelListUI {
             fragment.appendChild(this.renderSuperUnitHeader(group));
             group.units.forEach(unit => {
                 const isCurrent = unit.id === state.currentUnitId;
-                fragment.appendChild(this.renderUnitRow(unit, unitIdx, state, isCurrent));
-                if (isCurrent) {
+                const isOpen = isCurrent && !this.collapsedUnits.has(unit.id);
+                fragment.appendChild(this.renderUnitRow(unit, unitIdx, state, isCurrent, isOpen));
+                if (isOpen) {
                     fragment.appendChild(this.renderUnitChildren(unit, state));
                 }
                 unitIdx++;
@@ -99,46 +107,61 @@ export class LevelListUI {
         return div;
     }
 
-    renderUnitRow(unit, idx, state, isExpanded) {
+    renderUnitRow(unit, idx, state, isCurrent, isOpen) {
         const unlocked = this.learnBloc.isUnitUnlocked(unit);
         const completedCount = this.learnBloc.getUnitCompletedCount(unit.id);
         const totalCount = unit.exercises ? unit.exercises.length : 4;
         const isCompleted = completedCount > 0;
 
         const div = document.createElement('div');
-        div.className = `py-2 px-2 font-mono text-[11px] flex items-center justify-between transition-colors duration-100 ${
-            isExpanded
-                ? 'bg-[var(--active-bg)] text-[var(--active-text)] font-bold'
+        div.className = `py-2 px-2 font-mono text-[11px] flex items-center justify-between transition-colors duration-100 border-l-2 ${
+            isCurrent
+                ? 'border-[var(--accent-text)] text-[var(--accent-text)] font-bold'
                 : (unlocked
-                    ? 'bg-transparent text-[var(--sidebar-text)] hover:text-[var(--accent-text)] cursor-pointer'
-                    : 'bg-transparent text-[var(--text-muted)] cursor-not-allowed opacity-40')
+                    ? 'border-transparent text-[var(--sidebar-text)] hover:text-[var(--accent-text)] cursor-pointer'
+                    : 'border-transparent text-[var(--text-muted)] cursor-not-allowed opacity-40')
         }`;
         // Nests one level under its super-unit header -- style wins over
         // the px-2 class's own padding-left (same trick SidebarUI.js's
         // file-tree rows already use for the same reason).
         div.style.paddingLeft = `${8 + INDENT_PX}px`;
+        if (isCurrent) div.style.position = 'relative';
 
-        if (unlocked && !isExpanded) {
-            div.onclick = () => this.learnBloc.loadUnit(unit.id);
+        // Same "always toggles" contract as SidebarUI's folder rows: not
+        // the current unit -> switch to it (and open it); already current
+        // -> just fold/unfold its children, same as collapsing a folder
+        // never changes the active file.
+        if (unlocked) {
+            div.onclick = () => {
+                if (isCurrent) {
+                    if (isOpen) this.collapsedUnits.add(unit.id);
+                    else this.collapsedUnits.delete(unit.id);
+                    this.render(this.learnBloc.state);
+                } else {
+                    this.collapsedUnits.delete(unit.id);
+                    this.learnBloc.loadUnit(unit.id);
+                }
+            };
         }
 
         const prefix = isCompleted ? '[OK]' : (unlocked ? `[${String(idx + 1).padStart(2, '0')}]` : '[-]');
         const shortTitle = unit.title.replace(/^Unidad \d+:\s*/i, '');
 
         const chevron = unlocked
-            ? `<span style="transform: rotate(${isExpanded ? 90 : 0}deg); display: inline-flex;">${CHEVRON_ICON}</span>`
+            ? `<span style="transform: rotate(${isOpen ? 90 : 0}deg); display: inline-flex;">${CHEVRON_ICON}</span>`
             : `<span class="w-3 flex-shrink-0"></span>`;
 
         div.innerHTML = `
             <div class="flex items-center gap-1.5 overflow-hidden pointer-events-none min-w-0 flex-1 mr-2">
                 ${chevron}
-                <span class="flex-shrink-0 whitespace-nowrap ${isExpanded ? 'text-[var(--active-text)] font-bold' : (isCompleted ? 'text-[var(--success-text)] font-bold' : 'text-[var(--text-muted)]')}">${prefix}</span>
+                <span class="flex-shrink-0 whitespace-nowrap ${isCurrent ? 'text-[var(--accent-text)] font-bold' : (isCompleted ? 'text-[var(--success-text)] font-bold' : 'text-[var(--text-muted)]')}">${prefix}</span>
                 <span class="truncate min-w-0">${shortTitle}</span>
             </div>
-            <span class="flex-shrink-0 text-[10px] font-mono tracking-wider ${isExpanded ? 'text-[var(--active-text)] font-bold' : 'text-[var(--text-muted)]'}">
+            <span class="flex-shrink-0 text-[10px] font-mono tracking-wider ${isCurrent ? 'text-[var(--accent-text)] font-bold' : 'text-[var(--text-muted)]'}">
                 ${completedCount}/${totalCount}
             </span>
         `;
+        if (isCurrent) div.insertAdjacentHTML('beforeend', CORNER_MARKS_RIGHT);
 
         return div;
     }
@@ -166,12 +189,14 @@ export class LevelListUI {
     renderSpecChild(state) {
         const isActive = state.currentView === 'theory';
         const div = document.createElement('div');
-        div.className = `py-1.5 font-mono text-[11px] cursor-pointer transition-colors duration-100 ${
-            isActive ? 'bg-[var(--active-bg)] text-[var(--active-text)] font-bold' : 'text-[var(--sidebar-text)] hover:text-[var(--accent-text)]'
+        div.className = `py-1.5 font-mono text-[11px] cursor-pointer transition-colors duration-100 border-l-2 ${
+            isActive ? 'border-[var(--accent-text)] text-[var(--accent-text)] font-bold' : 'border-transparent text-[var(--sidebar-text)] hover:text-[var(--accent-text)]'
         }`;
         div.style.paddingLeft = `${8 + INDENT_PX * 2}px`;
+        if (isActive) div.style.position = 'relative';
         div.onclick = () => this.learnBloc.setView('theory');
         div.innerHTML = `[SPEC] Especificación`;
+        if (isActive) div.insertAdjacentHTML('beforeend', CORNER_MARKS_RIGHT);
         return div;
     }
 
@@ -189,14 +214,16 @@ export class LevelListUI {
         const label = ex.title.replace(/^M\d+:\s*/, '');
 
         const div = document.createElement('div');
-        div.className = `py-1.5 font-mono text-[11px] cursor-pointer transition-colors duration-100 ${
+        div.className = `py-1.5 font-mono text-[11px] cursor-pointer transition-colors duration-100 border-l-2 ${
             isActive
-                ? 'bg-[var(--active-bg)] text-[var(--active-text)] font-bold'
-                : (isPassed ? 'text-[var(--success-text)]' : 'text-[var(--sidebar-text)] hover:text-[var(--accent-text)]')
+                ? 'border-[var(--accent-text)] text-[var(--accent-text)] font-bold'
+                : (isPassed ? 'border-transparent text-[var(--success-text)]' : 'border-transparent text-[var(--sidebar-text)] hover:text-[var(--accent-text)]')
         }`;
         div.style.paddingLeft = `${8 + INDENT_PX * 2}px`;
+        if (isActive) div.style.position = 'relative';
         div.onclick = () => this.learnBloc.selectExercise(ex.id);
         div.innerHTML = `${isPassed ? '[OK]' : `[${missionNum}]`} ${label}`;
+        if (isActive) div.insertAdjacentHTML('beforeend', CORNER_MARKS_RIGHT);
         return div;
     }
 }
