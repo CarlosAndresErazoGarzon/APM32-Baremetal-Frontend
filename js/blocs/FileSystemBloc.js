@@ -40,10 +40,80 @@ export class FileSystemBloc extends Bloc {
             this._state = { ...this._state, virtualFS: draft.virtualFS, currentFile: draft.currentFile };
         }
 
+        // A project already carrying a file/folder name collision (created
+        // before createFile/renameFile/renameFolder's guards existed, or
+        // resurrected by an old cloud copy from before saveProjectToCloud's
+        // mergeFields fix -- see that method's own comment) used to just
+        // sit there until the student happened to try compiling and hit a
+        // dead end every single time, with no way to tell WHERE the
+        // problem was short of hunting through the tree by hand. Sanitize
+        // on construction too, not just on setNamespace/
+        // loadProjectFromCloud, so a guest project or one restored from a
+        // local draft gets the same self-healing.
+        this.sanitizeState();
+
         // Mirrors every future state change to localStorage -- covers all
         // the existing mutating methods (createFile, updateFileContent,
         // ...) automatically, without touching each one individually.
         this.subscribe(() => this.persistLocal());
+    }
+
+    // Renames away any plain-file/folder name collision in virtualFS (see
+    // folderExistsAt/fileBlockingPath's own comment for what that is and
+    // why it's possible at all) by appending "_file" to the offending
+    // PLAIN FILE's name -- the folder keeps its original name since it's
+    // usually the one holding more/newer content, and the rename is
+    // mechanical/reversible (nothing about a bare extension-less name like
+    // "fun_est" was ever load-bearing). Called wherever virtualFS gets
+    // replaced wholesale (constructor, setNamespace, loadProjectFromCloud)
+    // instead of requiring the student to find and fix it by hand after a
+    // compile fails -- this IS how that class of bug kept resurfacing even
+    // after being "fixed": deleting the stray file only fixed the LOCAL
+    // copy, and the next cloud load brought the old, still-colliding one
+    // right back (a real reported bug, now with a second layer of defense
+    // beyond just not letting it happen again from the UI going forward).
+    sanitizeState() {
+        const { virtualFS, renamed } = this.sanitizeCollisions(this.state.virtualFS);
+        if (renamed.length === 0) return;
+
+        let currentFile = this.state.currentFile;
+        for (const [oldKey, newKey] of renamed) {
+            if (currentFile === oldKey) currentFile = newKey;
+        }
+        this._state = { ...this._state, virtualFS, currentFile };
+
+        for (const [oldKey, newKey] of renamed) {
+            globalEventBus.emit('LOG', {
+                message: `Fixed a file/folder name collision: renamed "${oldKey}" to "${newKey}" (it was both a file and a folder name).`,
+                type: 'warn'
+            });
+        }
+    }
+
+    // Pure function: returns a new virtualFS with every stray plain-file/
+    // folder collision resolved, plus the list of [oldKey, newKey] renames
+    // made -- kept separate from sanitizeState() so it can run on data
+    // that isn't this.state yet (loadProjectFromCloud's freshly-fetched
+    // doc, in particular).
+    sanitizeCollisions(virtualFS) {
+        const result = { ...virtualFS };
+        const renamed = [];
+        // Longest-key-first so a rename never invalidates a not-yet-
+        // checked shorter key's own folderExistsAt() lookup mid-loop.
+        const keys = Object.keys(virtualFS).sort((a, b) => b.length - a.length);
+        for (const key of keys) {
+            if (result[key] === undefined) continue; // already renamed away this pass
+            if (!this.folderExistsAt(key, result)) continue;
+
+            let newKey = `${key}_file`;
+            while (result[newKey] !== undefined || this.folderExistsAt(newKey, result)) {
+                newKey += '_2';
+            }
+            result[newKey] = result[key];
+            delete result[key];
+            renamed.push([key, newKey]);
+        }
+        return { virtualFS: result, renamed };
     }
 
     localDraftKey() {
@@ -95,9 +165,18 @@ export class FileSystemBloc extends Bloc {
             // confirmed cloud copy, so 'scratchpad' is right here even
             // while signing IN -- loadProjectFromCloud() flips it to
             // 'cloud' right after, if that account actually has one.
+            const { virtualFS, renamed } = this.sanitizeCollisions(draft.virtualFS);
+            let currentFile = draft.currentFile;
+            for (const [oldKey, newKey] of renamed) {
+                if (currentFile === oldKey) currentFile = newKey;
+                globalEventBus.emit('LOG', {
+                    message: `Fixed a file/folder name collision: renamed "${oldKey}" to "${newKey}" (it was both a file and a folder name).`,
+                    type: 'warn'
+                });
+            }
             this.emit({
-                virtualFS: draft.virtualFS,
-                currentFile: draft.currentFile,
+                virtualFS,
+                currentFile,
                 projectType: 'scratchpad',
                 projectName: '',
                 projectId: null
@@ -199,25 +278,35 @@ export class FileSystemBloc extends Bloc {
 
         const newFS = { ...this.state.virtualFS };
         newFS[filename] = `// New file: ${filename}\n`;
-        
+
         this.emit({ virtualFS: newFS, currentFile: filename });
+        // Same signal EditorUI fires on every keystroke -- AutoSaveUI
+        // listens for exactly this to schedule a cloud save. Without it,
+        // create/delete/rename never got persisted on their own: a real
+        // reported bug (deleting a stray file, then reloading/logging back
+        // in, brought it right back) because nothing scheduled a save
+        // until the user happened to also EDIT something afterward, or
+        // clicked SAVE CLOUD manually. File-tree operations are exactly as
+        // much "a change worth saving" as typing is.
+        globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         globalEventBus.emit('LOG', { message: `Created ${filename}`, type: 'success' });
         return true;
     }
 
     deleteFile(filename) {
         if (!this.state.virtualFS[filename]) return;
-        
+
         const newFS = { ...this.state.virtualFS };
         delete newFS[filename];
-        
+
         let newCurrent = this.state.currentFile;
         if (newCurrent === filename) {
             const keys = Object.keys(newFS);
             newCurrent = keys.length > 0 ? keys[0] : null;
         }
-        
+
         this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         globalEventBus.emit('LOG', { message: `Deleted ${filename}`, type: 'warn' });
     }
 
@@ -247,6 +336,7 @@ export class FileSystemBloc extends Bloc {
         }
 
         this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         globalEventBus.emit('LOG', { message: `Renamed to ${newName}`, type: 'success' });
         return true;
     }
@@ -285,6 +375,7 @@ export class FileSystemBloc extends Bloc {
         });
 
         this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         globalEventBus.emit('LOG', { message: `Renamed folder to ${newPath}`, type: 'success' });
         return true;
     }
@@ -310,6 +401,7 @@ export class FileSystemBloc extends Bloc {
         }
 
         this.emit({ virtualFS: newFS, currentFile: newCurrent });
+        globalEventBus.emit('EDITOR_CONTENT_CHANGED');
         globalEventBus.emit('LOG', { message: `Deleted folder ${folderPath}`, type: 'warn' });
         return true;
     }
@@ -361,7 +453,21 @@ export class FileSystemBloc extends Bloc {
             globalEventBus.emit('LOG', { message: "Loading project from cloud...", type: 'warn' });
             const doc = await db.collection("users").doc(user.uid).get();
             if (doc.exists && doc.data()[this.cloudField]) {
-                const loadedFS = doc.data()[this.cloudField];
+                const rawFS = doc.data()[this.cloudField];
+                // This is the actual fix for a real reported bug: a
+                // file/folder collision (e.g. deleting a stray "fun_est"
+                // file from the tree) kept "coming back" on every fresh
+                // login even after being deleted, because the delete alone
+                // never reached Firestore (see FileSystemBloc's other
+                // mutations, now fixed to trigger autosave too) -- so the
+                // NEXT loadProjectFromCloud() pulled the still-colliding
+                // old copy right back down. Sanitizing HERE, on the way
+                // in, means a project that's already corrupted (saved
+                // before any of these fixes existed) self-heals the moment
+                // it's loaded, instead of erroring out on every single
+                // compile until its owner manually hunts down the
+                // offending name.
+                const { virtualFS: loadedFS, renamed } = this.sanitizeCollisions(rawFS);
                 const firstFile = Object.keys(loadedFS)[0];
                 this.emit({
                     virtualFS: loadedFS,
@@ -370,6 +476,24 @@ export class FileSystemBloc extends Bloc {
                     projectName: user.email,
                     projectId: null
                 });
+                for (const [oldKey, newKey] of renamed) {
+                    globalEventBus.emit('LOG', {
+                        message: `Fixed a file/folder name collision: renamed "${oldKey}" to "${newKey}" (it was both a file and a folder name).`,
+                        type: 'warn'
+                    });
+                }
+                if (renamed.length > 0) {
+                    // Push the fix back up too, not just into this
+                    // session's local state -- otherwise the very next
+                    // fresh login (before anyone happens to edit something
+                    // or click SAVE CLOUD, and regardless of whether
+                    // autosave is even turned on) pulls the still-broken
+                    // copy right back down and this whole cycle repeats.
+                    // Data-integrity self-heal, not a feature the student
+                    // opts into, so this bypasses the autosave toggle on
+                    // purpose instead of just emitting EDITOR_CONTENT_CHANGED.
+                    await this.saveProjectToCloud(db, user);
+                }
                 globalEventBus.emit('LOG', { message: "Project loaded successfully!", type: 'success' });
             } else {
                 globalEventBus.emit('LOG', { message: "No saved project found.", type: 'info' });

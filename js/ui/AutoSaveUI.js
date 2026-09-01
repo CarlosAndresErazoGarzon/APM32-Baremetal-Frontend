@@ -6,11 +6,18 @@ const DEBOUNCE_MS = 2500;
 /**
  * AutoSaveUI
  * A checkbox next to "SAVE CLOUD" that, when on, saves to Firestore ~2.5s
- * after the user stops typing (debounced), reusing the same
- * FileSystemBloc.saveProjectToCloud() the manual button calls. Only shown
- * once logged in, since cloud save requires auth. Off by default -- it's
- * opt-in so it never silently overwrites a saved cloud project without the
- * user having asked for that behavior at least once.
+ * after something in this mode's project changes (debounced), reusing the
+ * same FileSystemBloc.saveProjectToCloud() the manual button calls. Only
+ * shown once logged in, since cloud save requires auth. Off by default --
+ * it's opt-in so it never silently overwrites a saved cloud project
+ * without the user having asked for that behavior at least once.
+ *
+ * Despite the name, EDITOR_CONTENT_CHANGED isn't just keystrokes anymore --
+ * FileSystemBloc's createFile/deleteFile/renameFile/renameFolder/
+ * deleteFolder fire it too (a real reported bug without that: deleting a
+ * file, then reloading or logging back in before ever also editing
+ * something or clicking SAVE CLOUD, brought the deleted file right back --
+ * nothing had scheduled a save for a pure file-tree operation).
  *
  * One instance per mode that has a FileSystemBloc (IDE, Playground -- Learn
  * has its own separate progress/draft sync, no FileSystemBloc involved).
