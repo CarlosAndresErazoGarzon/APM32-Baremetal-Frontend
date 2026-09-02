@@ -25,8 +25,14 @@ export class PlaygroundBloc extends Bloc {
     // executables carried forward from a PREVIOUS exec()'s response (see
     // ConsoleUI.js) -- lets "gcc main.c -o test" in one command and
     // "./test" in a separate one work, even though each command runs in
-    // its own fresh, disposable sandbox dir server-side.
-    async exec(apiUrl, files, command, stdin, binaryFiles) {
+    // its own fresh, disposable sandbox dir server-side. `cwd` is the same
+    // idea for `cd`: the relative directory a PREVIOUS response reported
+    // ending up in (see learnRunner.js's execCommand()), echoed back so
+    // this command starts there instead of always at the project root --
+    // without it, `cd somewhere` looked like it worked (exit code 0) but
+    // had zero effect on the very next command, since each one is its own
+    // disposable sandbox with no real persistent shell.
+    async exec(apiUrl, files, command, stdin, binaryFiles, cwd) {
         if (this.state.isExecuting) return null;
         this.emit({ isExecuting: true });
 
@@ -34,7 +40,7 @@ export class PlaygroundBloc extends Bloc {
             const response = await fetch(`${apiUrl}/playground/exec`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ files, command, stdin: stdin || '', binaryFiles })
+                body: JSON.stringify({ files, command, stdin: stdin || '', binaryFiles, cwd })
             });
 
             const result = await response.json();

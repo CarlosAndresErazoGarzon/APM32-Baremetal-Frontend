@@ -11,10 +11,17 @@
  *
  * Each submitted command is a fresh, disposable sandbox job seeded from
  * the CURRENT file manager state (see backend/learnRunner.js's
- * execCommand()) -- there's no real persistent shell/cwd across commands,
- * but since every run's outputFiles get merged back into the file manager
+ * execCommand()) -- there's no real persistent shell across commands, but
+ * since every run's outputFiles get merged back into the file manager
  * before the next command starts, it still *feels* stateful across
- * commands (a file one command creates is there for the next one).
+ * commands (a file one command creates is there for the next one). `cd`
+ * gets the same treatment via `this.currentDir`: the server reports back
+ * whatever directory the shell ended up in (relative to the project
+ * root), this class remembers it, and sends it along with the NEXT
+ * command so the fresh sandbox starts there instead of always back at the
+ * root -- a real reported bug without this: `cd archivos/` looked like it
+ * worked (exit code 0) but the very next command ran as if it never
+ * happened.
  *
  * Compiled binaries are a special case: they're deliberately never merged
  * into the file manager (they'd just render as garbage in Monaco), but
@@ -33,6 +40,9 @@ export class ConsoleUI {
         this.playgroundFsBloc = playgroundFsBloc;
         this.apiUrl = apiUrl;
         this.sessionBinaries = {};
+        // '' means the project root -- same convention execCommand() uses
+        // for "no cwd sent" / "ended back up at the root".
+        this.currentDir = '';
 
         this.output = document.getElementById('consoleOutput');
         this.input = document.getElementById('consoleCommandInput');
@@ -73,6 +83,7 @@ export class ConsoleUI {
             this.clearBtn.onclick = () => {
                 this.output.innerHTML = '';
                 this.sessionBinaries = {};
+                this.currentDir = '';
                 this.playgroundFsBloc.setBinaryNames([]);
             };
         }
@@ -98,7 +109,12 @@ export class ConsoleUI {
             return;
         }
 
-        this.appendLine(`$ ${command}`, 'command');
+        // Shows where the command is actually about to run -- the whole
+        // point of tracking this is so `cd` visibly "sticks"; without some
+        // indicator here a working `cd` and a silently-ignored one looked
+        // identical (both just echoed the command with exit code 0).
+        const promptPrefix = this.currentDir ? `${this.currentDir} ` : '';
+        this.appendLine(`${promptPrefix}$ ${command}`, 'command');
         this.input.value = '';
         this.setBusy(true);
 
@@ -116,8 +132,15 @@ export class ConsoleUI {
         // learnRunner.js's execCommand()), so a program that calls
         // scanf()/getchar() needs its input supplied up front instead.
         const stdin = this.stdinInput ? this.stdinInput.value : '';
-        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, stdin, this.sessionBinaries);
+        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, stdin, this.sessionBinaries, this.currentDir);
         this.setBusy(false);
+
+        // Always trust the server's answer over whatever this class
+        // thought before the call -- it ran the actual shell and knows
+        // where `cd` (if any) really ended up, including falling back to
+        // '' itself if this.currentDir pointed at a folder that's since
+        // been deleted/renamed (see learnRunner.js's resolveCwd()).
+        if (typeof result.cwd === 'string') this.currentDir = result.cwd;
 
         if (result.stdout) this.appendLine(result.stdout.replace(/\n$/, ''), 'stdout');
         if (result.stderr) this.appendLine(result.stderr.replace(/\n$/, ''), 'stderr');
