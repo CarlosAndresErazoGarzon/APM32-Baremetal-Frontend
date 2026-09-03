@@ -1,262 +1,251 @@
+import { globalEventBus } from '../core/EventBus.js';
+
+// How long to wait before opening a fresh session after the shell exits
+// (typing `exit`, or the idle/max-session timeout on the backend -- see
+// ptySession.js) -- long enough that a rapid-fire reconnect loop can't spam
+// the server if something's genuinely broken, short enough that it doesn't
+// feel like a dead terminal.
+const RECONNECT_DELAY_MS = 1000;
+// Debounce for pushing Monaco edits into an already-running session's
+// jobDir (see 'sync' in initEventListeners()) -- EDITOR_CONTENT_CHANGED
+// fires on every keystroke (EditorUI.js is deliberately un-debounced at
+// the bloc level), so this class debounces on its own end instead of
+// sending one WS message per character typed.
+const FILE_SYNC_DEBOUNCE_MS = 500;
+
 /**
  * ConsoleUI
- * Playground's manual "terminal" tab -- a real command line the student
- * types themselves (their own gcc flags, &&-chains, just "./prog" after a
- * previous compile, etc.) instead of the fixed compile-then-run RUN button
- * does. The prompt lives at the bottom of the panel, like a real terminal,
- * not a text box up in the tab header. Owns #consoleOutput/
- * #consoleCommandInput/#consoleClearBtn exclusively; visibility (Playground
- * mode only) is owned by ModeSwitcherUI, tab switching by TerminalUI --
- * this class only owns what happens once the tab is actually showing.
+ * Playground's manual "terminal" tab -- a REAL interactive terminal now
+ * (xterm.js rendering, a live pty streamed over a WebSocket -- see
+ * backend/ptySession.js), not a request/response transcript with a
+ * separate stdin box. Typing while a program is running (even one blocked
+ * on scanf()/getchar()) sends keystrokes straight to it, exactly like a
+ * real terminal, because there IS a real, persistent process on the other
+ * end now instead of a fresh disposable sandbox per command.
  *
- * Each submitted command is a fresh, disposable sandbox job seeded from
- * the CURRENT file manager state (see backend/learnRunner.js's
- * execCommand()) -- there's no real persistent shell across commands, but
- * since every run's outputFiles get merged back into the file manager
- * before the next command starts, it still *feels* stateful across
- * commands (a file one command creates is there for the next one). `cd`
- * gets the same treatment via `this.currentDir`: the server reports back
- * whatever directory the shell ended up in (relative to the project
- * root), this class remembers it, and sends it along with the NEXT
- * command so the fresh sandbox starts there instead of always back at the
- * root -- a real reported bug without this: `cd archivos/` looked like it
- * worked (exit code 0) but the very next command ran as if it never
- * happened.
+ * Connects lazily -- the first time the Console tab is actually shown (see
+ * TerminalUI.js's CONSOLE_TAB_SHOWN event), not at page load -- so a
+ * student who never opens Playground's terminal never costs the server a
+ * live shell process. Reconnects automatically if the shell exits (typing
+ * `exit`, or the backend's own idle/max-session timeout) so the tab never
+ * just goes dead.
  *
- * Compiled binaries are a special case: they're deliberately never merged
- * into the file manager (they'd just render as garbage in Monaco), but
- * they still need to survive to the NEXT command -- "gcc main.c -o test"
- * then, separately, "./test" -- so they're kept in `this.sessionBinaries`
- * instead, a private base64 bucket only this class ever sees, sent along
- * with every exec() call and refreshed from every response.
- *
- * Tab completes filenames/compiled-binary names (see handleTabComplete())
- * -- not PATH commands, this client has no authoritative list of what the
- * sandbox's shell actually has installed.
+ * File sync: the live session polls its own sandbox dir and pushes changed
+ * files back over the SAME WebSocket (see the 'files' message below) --
+ * this class just merges whatever it's handed into the file manager,
+ * exactly like the old exec()-per-command flow did at the end of each
+ * command, just on a running timer instead of a request boundary now that
+ * there IS no per-command boundary anymore.
  */
 export class ConsoleUI {
-    constructor(playgroundBloc, playgroundFsBloc, apiUrl) {
-        this.playgroundBloc = playgroundBloc;
+    constructor(playgroundFsBloc, apiUrl) {
         this.playgroundFsBloc = playgroundFsBloc;
         this.apiUrl = apiUrl;
-        this.sessionBinaries = {};
-        // '' means the project root -- same convention execCommand() uses
-        // for "no cwd sent" / "ended back up at the root".
-        this.currentDir = '';
 
-        this.output = document.getElementById('consoleOutput');
-        this.input = document.getElementById('consoleCommandInput');
+        this.mount = document.getElementById('consoleXtermMount');
         this.clearBtn = document.getElementById('consoleClearBtn');
-        this.stdinInput = document.getElementById('consoleStdinInput');
-        this.stdinToggle = document.getElementById('consoleStdinToggle');
 
+        this.term = null;
+        this.fitAddon = null;
+        this.ws = null;
+        this.connectStarted = false;
+        // True from the moment a connection drop is first reported until
+        // it either succeeds again or a clean shell exit takes over --
+        // see connect()'s own comment on why this exists (without it, a
+        // backend that's down for a while prints a fresh "reconnecting"
+        // line on every single retry, once a second, forever).
+        this.reconnecting = false;
+        // Echoed back on the NEXT session's 'start' message so reopening
+        // the terminal (after `exit`, a timeout, or just a page reload)
+        // resumes wherever the student last `cd`'d instead of always
+        // landing back at the project root -- same idea as the old
+        // batch flow's cwd round-trip, just sourced from the live pty's
+        // actual OS-level cwd instead of parsing a marker out of stdout.
+        this.lastCwd = '';
+
+        this.initTerminal();
         this.initEventListeners();
+
+        // Catches a real reported bug: TerminalUI is constructed BEFORE
+        // this class in app.js, and its modeBloc.subscribe() callback
+        // fires SYNCHRONOUSLY with the CURRENT mode the moment it
+        // subscribes (see Bloc.js's subscribe() -- it calls back
+        // immediately, not just on future changes). If the page loads
+        // directly into Playground mode (persisted from a previous visit,
+        // not a live click), that synchronous fire calls
+        // switchTerminalTab('console') and emits CONSOLE_TAB_SHOWN before
+        // this class -- and its listener for that exact event -- even
+        // exists yet. The event fires into nothing, connect() never gets
+        // called, and the terminal sits there forever with a blank
+        // cursor: mounted, but never actually connected, so typing does
+        // nothing (xterm has no local echo of its own -- it relies
+        // entirely on the pty echoing back whatever was sent).
+        // Checking the DOM directly here doesn't care about construction
+        // order at all: whatever hid/showed #consolePanel already ran by
+        // the time THIS constructor executes, regardless of whether the
+        // event that used to signal it was heard.
+        if (this.mount && !document.getElementById('consolePanel')?.classList.contains('hidden')) {
+            this.connect();
+        }
+    }
+
+    initTerminal() {
+        // eslint-disable-next-line no-undef
+        if (!this.mount || typeof Terminal === 'undefined') return;
+        // eslint-disable-next-line no-undef
+        this.term = new Terminal({
+            fontFamily: "'Inconsolata', monospace",
+            fontSize: 13,
+            cursorBlink: true,
+            scrollback: 5000,
+            theme: this.computeXtermTheme(),
+        });
+        // eslint-disable-next-line no-undef
+        this.fitAddon = new FitAddon.FitAddon();
+        this.term.loadAddon(this.fitAddon);
+        this.term.open(this.mount);
+        this.safeFit();
+
+        // Every keystroke (including ones a real terminal would treat
+        // specially -- Ctrl+C, arrow keys, backspace) goes straight to the
+        // pty as raw bytes; bash's own readline on the other end is what
+        // makes backspace/history/Ctrl+C work, not anything client-side.
+        this.term.onData(data => this.sendWs({ type: 'input', data }));
+        this.term.onResize(({ cols, rows }) => this.sendWs({ type: 'resize', cols, rows }));
+
+        window.addEventListener('resize', () => this.safeFit());
     }
 
     initEventListeners() {
-        if (this.stdinToggle && this.stdinInput) {
-            this.stdinToggle.onclick = () => {
-                const nowHidden = this.stdinInput.classList.toggle('hidden');
-                this.stdinToggle.textContent = nowHidden ? '[+] Stdin' : '[-] Stdin';
-                if (!nowHidden) this.stdinInput.focus();
-            };
+        if (this.clearBtn) {
+            this.clearBtn.onclick = () => { if (this.term) this.term.clear(); };
         }
-        if (this.input) {
-            this.input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.execute();
-                } else if (e.key === 'Tab') {
-                    // Default Tab behavior would jump focus to the next
-                    // element on the page -- a real terminal keeps focus
-                    // and completes instead.
-                    e.preventDefault();
-                    this.handleTabComplete();
-                }
-            });
-        }
-        if (this.clearBtn && this.output) {
-            // Clearing the transcript also drops any compiled binaries from
-            // this session -- a clean slate, not just a visual reset, so a
-            // stale "./test" from a previous unrelated attempt can't linger
-            // silently.
-            this.clearBtn.onclick = () => {
-                this.output.innerHTML = '';
-                this.sessionBinaries = {};
-                this.currentDir = '';
-                this.playgroundFsBloc.setBinaryNames([]);
-            };
+
+        globalEventBus.on('CONSOLE_TAB_SHOWN', () => {
+            if (!this.connectStarted) this.connect();
+            this.safeFit();
+            if (this.term) this.term.focus();
+        });
+
+        // Keeps an already-running session's jobDir current with Monaco's
+        // latest content -- without this, editing main.c AFTER the
+        // terminal already connected would silently keep compiling
+        // whatever the file looked like at connect time (the session's
+        // jobDir is only ever seeded once). Fires for every mode's editor,
+        // not just Playground's, but reads this.playgroundFsBloc
+        // regardless -- a no-op sync (same content as last time) when the
+        // change came from IDE/Learn's own unrelated editor. Gated on
+        // connectStarted so it's silent until the student has actually
+        // opened the terminal at least once.
+        let syncTimer = null;
+        globalEventBus.on('EDITOR_CONTENT_CHANGED', () => {
+            if (!this.connectStarted) return;
+            clearTimeout(syncTimer);
+            syncTimer = setTimeout(() => {
+                const files = { ...this.playgroundFsBloc.state.virtualFS };
+                this.sendWs({ type: 'sync', files });
+            }, FILE_SYNC_DEBOUNCE_MS);
+        });
+
+        // Monaco isn't the only thing that can't read CSS custom properties
+        // directly -- xterm.js renders via canvas too. See EditorUI.js's
+        // refreshMonacoThemes() for the same pattern.
+        globalEventBus.on('THEME_TOKENS_CHANGED', () => this.refreshXtermTheme());
+
+        // See FontScaleUI.js's own comment on why this is needed -- a CSS
+        // zoom change resizes the terminal visually without ever firing a
+        // 'resize' event on window, so xterm's cached cols/rows would
+        // otherwise silently go stale.
+        globalEventBus.on('FONT_SCALE_CHANGED', () => this.safeFit());
+    }
+
+    safeFit() {
+        if (!this.fitAddon) return;
+        try { this.fitAddon.fit(); } catch { /* mount not visible/sized yet */ }
+    }
+
+    sendWs(msg) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(msg));
         }
     }
 
-    async execute() {
-        if (!this.input || !this.output) return;
-        const command = this.input.value.trim();
-        if (!command) return;
-        if (this.playgroundBloc.state.isExecuting) return;
+    connect() {
+        this.connectStarted = true;
+        const wsUrl = this.apiUrl.replace(/^http/, 'ws') + '/playground/pty';
+        this.ws = new WebSocket(wsUrl);
 
-        // Special-cased client-side instead of sent to the sandbox: this
-        // transcript is a plain scrolling div, not a real terminal emulator
-        // (no xterm.js), so it can't interpret ANSI escape codes -- the
-        // real Unix `clear` binary would just dump its literal control
-        // bytes as visible garbage ("[H[2J[3J") instead of actually
-        // clearing anything. Only wipes the transcript, unlike the Clear
-        // BUTTON, which also drops compiled binaries -- `clear` the shell
-        // command doesn't touch program state in a real terminal either.
-        if (command === 'clear') {
-            this.output.innerHTML = '';
-            this.input.value = '';
-            return;
-        }
-
-        // Shows where the command is actually about to run -- the whole
-        // point of tracking this is so `cd` visibly "sticks"; without some
-        // indicator here a working `cd` and a silently-ignored one looked
-        // identical (both just echoed the command with exit code 0).
-        const promptPrefix = this.currentDir ? `${this.currentDir} ` : '';
-        this.appendLine(`${promptPrefix}$ ${command}`, 'command');
-        this.input.value = '';
-        this.setBusy(true);
-
-        // virtualFS always holds the current file's latest text already --
-        // EditorUI pushes every keystroke into the bloc synchronously (see
-        // EditorUI.js) -- so the live file manager state is exactly what
-        // this request should be seeded from.
-        const state = this.playgroundFsBloc.state;
-        const files = { ...state.virtualFS };
-
-        // Whatever's in the (optional, collapsed-by-default) stdin box --
-        // there's no live/interactive stdin since each command is a fresh,
-        // non-interactive sandbox job that runs to completion before
-        // returning (see this file's own header comment and
-        // learnRunner.js's execCommand()), so a program that calls
-        // scanf()/getchar() needs its input supplied up front instead.
-        const stdin = this.stdinInput ? this.stdinInput.value : '';
-        const result = await this.playgroundBloc.exec(this.apiUrl, files, command, stdin, this.sessionBinaries, this.currentDir);
-        this.setBusy(false);
-
-        // Always trust the server's answer over whatever this class
-        // thought before the call -- it ran the actual shell and knows
-        // where `cd` (if any) really ended up, including falling back to
-        // '' itself if this.currentDir pointed at a folder that's since
-        // been deleted/renamed (see learnRunner.js's resolveCwd()).
-        if (typeof result.cwd === 'string') this.currentDir = result.cwd;
-
-        if (result.stdout) this.appendLine(result.stdout.replace(/\n$/, ''), 'stdout');
-        if (result.stderr) this.appendLine(result.stderr.replace(/\n$/, ''), 'stderr');
-
-        if (result.timedOut) {
-            this.appendLine('[timed out]', 'stderr');
-        } else if (typeof result.code === 'number') {
-            this.appendLine(`[exit code ${result.code}]`, result.code === 0 ? 'success' : 'stderr');
-        }
-
-        if (result.outputFiles) {
-            this.playgroundFsBloc.mergeChangedFiles(files, result.outputFiles);
-        }
-        // Carry compiled binaries (or any other genuinely binary output)
-        // forward for the next command -- overwrite, don't merge-forever:
-        // this IS the full current set the server just reported back.
-        if (result.binaryFiles) {
-            this.sessionBinaries = result.binaryFiles;
-            // Names only (not the base64 bytes) so the file manager can
-            // show that they exist -- see FileSystemBloc.setBinaryNames().
-            this.playgroundFsBloc.setBinaryNames(Object.keys(this.sessionBinaries));
-        }
-    }
-
-    // Filename/binary completion only -- no PATH command-name completion,
-    // since the real available command set (gcc, make, coreutils...) lives
-    // in the sandbox's own PATH, not anywhere this client knows about, and
-    // a hardcoded guess could confidently complete to something that
-    // doesn't actually exist there. Filenames are something this client
-    // genuinely has an authoritative answer for: virtualFS's own keys plus
-    // this session's compiled binaries (offered "./name", how you'd
-    // actually run one).
-    handleTabComplete() {
-        const value = this.input.value;
-        const cursorPos = this.input.selectionStart;
-        const before = value.slice(0, cursorPos);
-        const match = before.match(/(\S*)$/);
-        const partial = match ? match[1] : '';
-        if (!partial) return; // bare Tab on empty/trailing-space -- nothing to anchor a guess to
-
-        const candidates = this.completionCandidates(partial);
-        if (candidates.length === 0) return;
-
-        if (candidates.length === 1) {
-            this.applyCompletion(before, partial, candidates[0], value, cursorPos);
-            return;
-        }
-
-        // Several matches -- complete as far as their shared prefix goes
-        // (same as a real shell's double-Tab-adjacent behavior), and list
-        // the options so pressing Tab again isn't a silent no-op.
-        const commonPrefix = this.longestCommonPrefix(candidates);
-        if (commonPrefix.length > partial.length) {
-            this.applyCompletion(before, partial, commonPrefix, value, cursorPos);
-        } else {
-            this.appendLine(candidates.join('  '), 'stdout');
-        }
-    }
-
-    completionCandidates(partial) {
-        const names = new Set();
-        Object.keys(this.playgroundFsBloc.state.virtualFS).forEach(f => names.add(f));
-        Object.keys(this.sessionBinaries).forEach(f => names.add(`./${f}`));
-        return [...names].filter(n => n.startsWith(partial)).sort();
-    }
-
-    applyCompletion(before, partial, completion, fullValue, cursorPos) {
-        const prefix = before.slice(0, before.length - partial.length);
-        const after = fullValue.slice(cursorPos);
-        const newValue = prefix + completion + after;
-        this.input.value = newValue;
-        const newCursor = (prefix + completion).length;
-        this.input.setSelectionRange(newCursor, newCursor);
-    }
-
-    longestCommonPrefix(strings) {
-        let prefix = strings[0];
-        for (let i = 1; i < strings.length; i++) {
-            while (!strings[i].startsWith(prefix)) {
-                prefix = prefix.slice(0, -1);
-                if (!prefix) return '';
+        this.ws.onopen = () => {
+            if (this.reconnecting && this.term) {
+                this.reconnecting = false;
+                this.term.write('\r\n\x1b[90m[reconnected]\x1b[0m\r\n');
             }
-        }
-        return prefix;
+            const files = { ...this.playgroundFsBloc.state.virtualFS };
+            this.sendWs({ type: 'start', files, cwd: this.lastCwd });
+        };
+
+        this.ws.onmessage = (ev) => {
+            let msg;
+            try { msg = JSON.parse(ev.data); } catch { return; }
+
+            if (msg.type === 'data') {
+                if (this.term) this.term.write(msg.data);
+            } else if (msg.type === 'files') {
+                const files = { ...this.playgroundFsBloc.state.virtualFS };
+                this.playgroundFsBloc.mergeChangedFiles(files, msg.outputFiles);
+                this.playgroundFsBloc.setBinaryNames(Object.keys(msg.binaryFiles || {}));
+            } else if (msg.type === 'exit') {
+                if (typeof msg.cwd === 'string') this.lastCwd = msg.cwd;
+                if (this.term) {
+                    this.term.write('\r\n\x1b[90m[session ended -- starting a new one]\x1b[0m\r\n');
+                }
+                this.connectStarted = false;
+                setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+            } else if (msg.type === 'error' && this.term) {
+                this.term.write(`\r\n\x1b[31m[error] ${msg.message}\x1b[0m\r\n`);
+            }
+        };
+
+        // A network drop (not a clean shell exit -- that's the 'exit'
+        // message above) leaves connectStarted true forever otherwise,
+        // permanently blocking the CONSOLE_TAB_SHOWN handler's reconnect
+        // check from ever firing again.
+        //
+        // reconnecting-flag gate: a real reported bug -- a backend that's
+        // down for a while (e.g. mid dev-server restart) got a fresh
+        // "[connection lost -- reconnecting]" line every single retry,
+        // once a second, filling the transcript with dozens of identical
+        // lines in well under a minute. Only the FIRST drop in a losing
+        // streak prints anything now; onopen's own reconnecting check
+        // above prints exactly one "[reconnected]" once it actually comes
+        // back, so the signal (something happened) survives without the
+        // spam (it's still happening, still happening, still happening...).
+        this.ws.onclose = () => {
+            if (this.connectStarted) {
+                this.connectStarted = false;
+                if (!this.reconnecting) {
+                    this.reconnecting = true;
+                    if (this.term) {
+                        this.term.write('\r\n\x1b[90m[connection lost -- reconnecting]\x1b[0m\r\n');
+                    }
+                }
+                setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+            }
+        };
     }
 
-    setBusy(busy) {
-        if (this.input) this.input.disabled = busy;
-        // preventScroll: focusing this while the terminal pane is
-        // collapsed (overflow:hidden, no scrollable ancestor to satisfy
-        // the browser's default scroll-into-view) misplaces
-        // #terminalHeader -- see TerminalUI.js's own switchTerminalTab()
-        // for the confirmed repro of this exact bug.
-        if (!busy && this.input) this.input.focus({ preventScroll: true });
+    computeXtermTheme() {
+        const cs = getComputedStyle(document.documentElement);
+        const read = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
+        return {
+            background: read('--log-bg', '#000000'),
+            foreground: read('--text-main', '#e5e5e5'),
+            cursor: read('--accent-text', '#e5e5e5'),
+            selectionBackground: read('--accent-text', '#666666'),
+        };
     }
 
-    appendLine(text, kind) {
-        if (!text && kind !== 'command') return;
-        const div = document.createElement('div');
-        // stdout deliberately isn't pure/bright white -- same muted tone
-        // the Logs panel already uses for message text (TerminalUI.js's
-        // logMessage()), so a normal program's output doesn't glare against
-        // the near-black background the way full-brightness text would.
-        const isDark = !document.body.classList.contains('light-theme');
-        // stderr/success: same theme-aware red/emerald pairing TerminalUI's
-        // own logMessage() already uses -- the -400 shades read fine on the
-        // near-black dark background but wash out on light's near-white one.
-        const colorClass = {
-            command: isDark ? 'text-[var(--accent-text)] font-bold' : 'text-[var(--header-color)] font-bold',
-            stdout: isDark ? 'text-[var(--text-main)]' : 'text-[var(--text-main)]',
-            stderr: isDark ? 'text-red-400 font-semibold' : 'text-red-700 font-semibold',
-            success: isDark ? 'text-emerald-400 font-semibold' : 'text-emerald-800 font-semibold',
-        }[kind] || (isDark ? 'text-[var(--text-main)]' : 'text-[var(--text-main)]');
-        div.className = `whitespace-pre-wrap mb-0.5 ${colorClass}`;
-        div.textContent = text;
-        this.output.appendChild(div);
-        this.output.scrollTop = this.output.scrollHeight;
+    refreshXtermTheme() {
+        if (this.term) this.term.options.theme = this.computeXtermTheme();
     }
 }

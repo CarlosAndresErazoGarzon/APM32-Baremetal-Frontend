@@ -9,13 +9,12 @@ import { SerialBloc } from './js/blocs/SerialBloc.js';
 import { DapBloc } from './js/blocs/DapBloc.js';
 import { ModeBloc } from './js/blocs/ModeBloc.js';
 import { LearnBloc } from './js/blocs/LearnBloc.js';
-import { PlaygroundBloc } from './js/blocs/PlaygroundBloc.js';
+import { ThemeBloc } from './js/blocs/ThemeBloc.js';
 
 // UIs
 import { AuthUI } from './js/ui/AuthUI.js';
 import { SidebarUI } from './js/ui/SidebarUI.js';
 import { SidebarDrawerUI } from './js/ui/SidebarDrawerUI.js';
-import { SidebarSettingsUI } from './js/ui/SidebarSettingsUI.js';
 import { EditorUI } from './js/ui/EditorUI.js';
 import { TerminalUI } from './js/ui/TerminalUI.js';
 import { SerialUI } from './js/ui/SerialUI.js';
@@ -30,11 +29,13 @@ import { TheoryUI } from './js/ui/TheoryUI.js';
 import { TestResultsUI } from './js/ui/TestResultsUI.js';
 import { RunUI } from './js/ui/RunUI.js';
 import { ConsoleUI } from './js/ui/ConsoleUI.js';
+import { ThemeEditorUI } from './js/ui/ThemeEditorUI.js';
+import { FontScaleUI } from './js/ui/FontScaleUI.js';
 import { initHotkeys } from './js/ui/HotkeysUI.js';
 
 // Playground's seed is plain host C, no APM32 headers -- this is a freeform
 // space, not an ARM firmware project (see FileSystemBloc.js's constructor
-// params and PlaygroundBloc.js's runner).
+// params and ConsoleUI.js/backend/ptySession.js's live terminal).
 const PLAYGROUND_SEED = {
     'main.c': '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, APM32!\\n");\n    return 0;\n}\n'
 };
@@ -53,11 +54,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const dapBloc = new DapBloc();
     const modeBloc = new ModeBloc();
     const learnBloc = new LearnBloc();
-    const playgroundBloc = new PlaygroundBloc();
 
     // 2. Instantiate UIs and Inject Dependencies
     const authUI = new AuthUI(authBloc);
     const editorUI = new EditorUI(fsBloc, modeBloc, learnBloc, playgroundFsBloc);
+    // Constructed right after EditorUI, not earlier -- ThemeBloc's own
+    // constructor reads document.body's current light-theme class, which
+    // EditorUI's constructor is what actually sets.
+    const themeBloc = new ThemeBloc();
     const sidebarUI = new SidebarUI(fsBloc, () => editorUI.getContent());
     // Second SidebarUI instance targeting Playground's own sibling panel
     // markup -- #mobileMenuBtn/#sidebar/#sidebarOverlay are shared, single-
@@ -70,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
         exampleSelector: null
     });
     const sidebarDrawerUI = new SidebarDrawerUI();
-    const sidebarSettingsUI = new SidebarSettingsUI();
     const terminalUI = new TerminalUI(compilerBloc, fsBloc, dapBloc, CONFIG.API_URL, modeBloc);
     const serialUI = new SerialUI(serialBloc);
     const docsUI = new DocsUI();
@@ -87,7 +90,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const theoryUI = new TheoryUI(learnBloc);
     const testResultsUI = new TestResultsUI();
     const runUI = new RunUI(learnBloc, CONFIG.API_URL, () => editorUI.getContent());
-    const consoleUI = new ConsoleUI(playgroundBloc, playgroundFsBloc, CONFIG.API_URL);
+    const consoleUI = new ConsoleUI(playgroundFsBloc, CONFIG.API_URL);
+    const themeEditorUI = new ThemeEditorUI(themeBloc, authBloc);
+    const fontScaleUI = new FontScaleUI();
 
     // 3. System Initialization
     initBrandingTitle();
@@ -148,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fsBloc.setNamespace(null);
         playgroundFsBloc.setNamespace(null);
         learnBloc.setNamespace(null);
+        themeBloc.setNamespace(null);
         // Same guard as the initial load below -- don't clobber a guest
         // draft setNamespace() just restored.
         if (!fsBloc.restoredFromLocal && window.dynamicExamples && window.dynamicExamples.length > 0) {
@@ -167,10 +173,12 @@ document.addEventListener('DOMContentLoaded', () => {
         fsBloc.setNamespace(user.uid);
         playgroundFsBloc.setNamespace(user.uid);
         await learnBloc.setNamespace(user.uid);
+        themeBloc.setNamespace(user.uid);
 
         fsBloc.loadProjectFromCloud(db, user);
         playgroundFsBloc.loadProjectFromCloud(db, user);
         learnBloc.loadProgressFromCloud(db, user);
+        themeBloc.loadFromCloud(db, user);
     });
 
     // Local persistence for IDE/Playground/Learn: no longer needs wiring

@@ -10,6 +10,7 @@ export class EditorUI {
         this.editorContainer = document.getElementById('editor');
         this.themeToggleBtn = document.getElementById('themeToggle');
         this.themeIcon = document.getElementById('themeIcon');
+        this.presentationModeToggle = document.getElementById('presentationModeToggle');
 
         // One declarative entry per mode instead of a render*()/onEdit
         // method pair and a lastRendered* field hand-written for each --
@@ -72,67 +73,18 @@ export class EditorUI {
     initEditor() {
         if (!this.editorContainer || typeof monaco === 'undefined') return;
 
-        // Sage/olive dark palette. Monaco can't consume CSS variables
-        // directly, so these are index.html's :root tokens copied in by
-        // hand -- keep them in sync if that palette changes.
-        monaco.editor.defineTheme('mhrd-dark', {
-            base: 'vs-dark',
-            inherit: true,
-            rules: [
-                { background: '262A2B', foreground: 'C9C8B6' },
-                { token: 'comment', foreground: '8E948D', fontStyle: 'italic' },
-                { token: 'keyword', foreground: 'ff7b72', fontStyle: 'bold' },
-                { token: 'string', foreground: 'a5d6ff' },
-                { token: 'number', foreground: '79c0ff' },
-                { token: 'type', foreground: '7D9B8B', fontStyle: 'bold' },
-                { token: 'identifier', foreground: 'E2E0CF' },
-                { token: 'delimiter', foreground: 'C9C8B6' }
-            ],
-            colors: {
-                'editor.background': '#262A2B',
-                'editor.foreground': '#C9C8B6',
-                'editor.lineHighlightBackground': '#2F3B36',
-                'editorLineNumber.foreground': '#8E948D',
-                'editorLineNumber.activeForeground': '#E2E0CF',
-                'editorGutter.background': '#262A2B',
-                'editorIndentGuide.background': '#2F3B36',
-                'editorIndentGuide.activeBackground': '#353B3D',
-                'editorCursor.foreground': '#7D9B8B',
-                'editor.selectionBackground': '#353B3D',
-                'editor.inactiveSelectionBackground': '#2F3B36',
-                'editor.selectionHighlightBackground': '#2F3B36',
-                'editorWhitespace.foreground': '#353B3D'
-            }
-        });
-
-        // Same structure, light -- matching the warm gold/sand palette tokens.
-        monaco.editor.defineTheme('mhrd-light', {
-            base: 'vs',
-            inherit: true,
-            rules: [
-                { background: 'EDE4B7', foreground: '31302E' },
-                { token: 'comment', foreground: '666157', fontStyle: 'italic' },
-                { token: 'keyword', foreground: '8B2626', fontStyle: 'bold' },
-                { token: 'string', foreground: '40584B' },
-                { token: 'number', foreground: '7A4D1D' },
-                { token: 'type', foreground: '232220', fontStyle: 'bold' }
-            ],
-            colors: {
-                'editor.background': '#EDE4B7',
-                'editor.foreground': '#31302E',
-                'editor.lineHighlightBackground': '#E5DBAA',
-                'editorLineNumber.foreground': '#8A8375',
-                'editorLineNumber.activeForeground': '#232220',
-                'editorGutter.background': '#EDE4B7',
-                'editorIndentGuide.background': '#E5DBAA',
-                'editorIndentGuide.activeBackground': '#C8BE93',
-                'editorCursor.foreground': '#31302E',
-                'editor.selectionBackground': '#F5EFCF',
-                'editor.inactiveSelectionBackground': '#E5DBAA',
-                'editor.selectionHighlightBackground': '#E5DBAA',
-                'editorWhitespace.foreground': '#C8BE93'
-            }
-        });
+        this.refreshMonacoThemes();
+        // ThemeBloc emits this every time it re-applies CSS vars (on a
+        // token edit, a dark/light switch, a reset, or a cloud/local
+        // theme load) -- a real reported bug without this: changing
+        // "Fondo" in the new color editor (ThemeEditorUI.js) visibly
+        // recolored the whole page EXCEPT the editor surface itself,
+        // because Monaco doesn't read CSS custom properties at all --
+        // its colors only exist as whatever was last passed to
+        // defineTheme(). Redefining both themes from the CURRENT
+        // computed values and re-applying is the only way to keep it in
+        // sync; there's no live-binding Monaco offers instead.
+        globalEventBus.on('THEME_TOKENS_CHANGED', () => this.refreshMonacoThemes());
 
         this.editor = monaco.editor.create(this.editorContainer, {
             value: '',
@@ -191,15 +143,44 @@ export class EditorUI {
                 this.applyTheme();
             };
         }
+
+        // Not persisted across reloads on purpose (see index.html's own
+        // comment on this checkbox) -- a "turn it on right before class"
+        // toggle, not a standing preference like the theme/font-size ones.
+        if (this.presentationModeToggle) {
+            this.presentationModeToggle.onchange = () => {
+                this.editorContainer.classList.toggle('presentation-mode', this.presentationModeToggle.checked);
+                // Constraining #editor's own width (via CSS, see
+                // index.html's .presentation-mode rule) changes Monaco's
+                // available space -- automaticLayout's ResizeObserver
+                // usually catches this on its own, but this.layout() makes
+                // it instant instead of however long the observer takes to
+                // fire, same reasoning as every other forced layout() call
+                // in this file.
+                requestAnimationFrame(() => this.layout());
+            };
+        }
     }
 
     applyTheme() {
         document.body.classList.toggle('light-theme', !this.isDark);
 
-        // Monaco Theme
-        if (this.editor) {
-            monaco.editor.setTheme(this.isDark ? 'mhrd-dark' : 'mhrd-light');
-        }
+        // ThemeBloc listens for this and re-applies the NEW mode's 5
+        // tokens (as inline CSS custom properties -- see theme.js's
+        // applyTheme()) synchronously, right here, before this call
+        // returns. That ordering matters: refreshMonacoThemes() below
+        // reads getComputedStyle(), which only reflects whichever mode's
+        // rules are ACTUALLY active -- toggling the body class alone
+        // isn't enough on its own once ThemeBloc has ever applied inline
+        // overrides (inline styles beat the :root/body.light-theme
+        // stylesheet rules regardless of the class), so this has to fire,
+        // and finish, before Monaco's colors get rebuilt.
+        globalEventBus.emit('THEME_MODE_CHANGED', { isDark: this.isDark });
+
+        // refreshMonacoThemes() (triggered by ThemeBloc's own
+        // THEME_TOKENS_CHANGED, emitted synchronously from inside the
+        // line above) already redefines AND re-applies Monaco's theme --
+        // nothing left to do here beyond the class toggle and the emit.
 
         // Theme toggle is now a plain [Dark]/[Light] text label (see
         // index.html's sidebar footer), not an icon swap -- matches the
@@ -207,6 +188,71 @@ export class EditorUI {
         if (this.themeIcon) {
             this.themeIcon.textContent = this.isDark ? 'Dark' : 'Light';
         }
+    }
+
+    // Rebuilds BOTH Monaco themes from whatever the CSS custom properties
+    // currently resolve to, and re-applies whichever one matches the
+    // active mode. Monaco can't consume CSS variables directly -- these
+    // have to be read via getComputedStyle() and pushed in as plain hex
+    // strings, every time they might have changed (a token edit, a
+    // dark/light switch, a reset, or a cloud/local theme load finishing --
+    // see THEME_TOKENS_CHANGED's listener in initEditor()). Only ONE
+    // mode's rules are ever actually active in the DOM at a time, so this
+    // only builds the CURRENTLY active mode's definition correctly; the
+    // other one keeps whatever it was last defined as until the page
+    // actually switches to it (see applyTheme()'s own comment on why
+    // toggling happens before this reads anything).
+    refreshMonacoThemes() {
+        if (typeof monaco === 'undefined') return;
+        const css = document.documentElement;
+        const v = name => getComputedStyle(css).getPropertyValue(`--${name}`).trim();
+        const strip = hex => hex.replace('#', '');
+
+        const bg = v('terminal-bg'), text = v('text-main'), muted = v('text-muted');
+        const header = v('header-color'), accent = v('accent-text');
+        const activeBg = v('active-bg'), border = v('border-color'), danger = v('danger-text');
+
+        const themeName = this.isDark ? 'mhrd-dark' : 'mhrd-light';
+        monaco.editor.defineTheme(themeName, {
+            base: this.isDark ? 'vs-dark' : 'vs',
+            inherit: true,
+            rules: [
+                { background: strip(bg), foreground: strip(text) },
+                { token: 'comment', foreground: strip(muted), fontStyle: 'italic' },
+                { token: 'keyword', foreground: strip(danger), fontStyle: 'bold' },
+                // Deliberately NOT derived from the 5 tokens -- these keep
+                // the conventional code-editor blue (dark) / the
+                // original hand-picked brown-green (light) regardless of
+                // theme, same as before this whole system existed.
+                // Overriding "string"/"number" with the theme's own base/
+                // accent hues would fight the strong, expected "blue-ish =
+                // string/number" convention for no real readability gain.
+                { token: 'string', foreground: this.isDark ? 'a5d6ff' : '40584B' },
+                { token: 'number', foreground: this.isDark ? '79c0ff' : '7A4D1D' },
+                { token: 'type', foreground: strip(accent), fontStyle: 'bold' },
+                ...(this.isDark ? [
+                    { token: 'identifier', foreground: strip(header) },
+                    { token: 'delimiter', foreground: strip(text) }
+                ] : [])
+            ],
+            colors: {
+                'editor.background': bg,
+                'editor.foreground': text,
+                'editor.lineHighlightBackground': activeBg,
+                'editorLineNumber.foreground': muted,
+                'editorLineNumber.activeForeground': header,
+                'editorGutter.background': bg,
+                'editorIndentGuide.background': activeBg,
+                'editorIndentGuide.activeBackground': border,
+                'editorCursor.foreground': accent,
+                'editor.selectionBackground': border,
+                'editor.inactiveSelectionBackground': activeBg,
+                'editor.selectionHighlightBackground': activeBg,
+                'editorWhitespace.foreground': border
+            }
+        });
+
+        if (this.editor) monaco.editor.setTheme(themeName);
     }
 
     onModeChange(modeState) {

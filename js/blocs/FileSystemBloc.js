@@ -261,6 +261,19 @@ export class FileSystemBloc extends Bloc {
         return null;
     }
 
+    // NAME_H from "path/to/Name.h" -- basename only (a header nested under
+    // inc/ or similar doesn't need its own path baked into the guard, and
+    // keeping it simple matches what this course actually teaches), non-
+    // alnum runs collapsed to a single underscore, and a leading underscore
+    // added if the result would otherwise start with a digit (invalid as a
+    // macro name on its own, e.g. "3d_math.h" -> "3D_MATH_H" needs it).
+    headerGuardName(filename) {
+        const base = filename.includes('/') ? filename.slice(filename.lastIndexOf('/') + 1) : filename;
+        let guard = base.replace(/\.h$/i, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+        if (/^[0-9]/.test(guard)) guard = '_' + guard;
+        return `${guard}_H`;
+    }
+
     createFile(filename) {
         if (this.state.virtualFS[filename]) {
             globalEventBus.emit('LOG', { message: 'File already exists!', type: 'error' });
@@ -277,7 +290,34 @@ export class FileSystemBloc extends Bloc {
         }
 
         const newFS = { ...this.state.virtualFS };
-        newFS[filename] = `// New file: ${filename}\n`;
+        const createdNames = [filename];
+
+        if (/\.h$/i.test(filename)) {
+            // A real header, not a placeholder comment: the include guard
+            // every C header needs, ready to fill in. See the user's own
+            // request -- "when I create a .h, give it what a header
+            // carries, and its companion .c".
+            const guard = this.headerGuardName(filename);
+            newFS[filename] = `#ifndef ${guard}\n#define ${guard}\n\n\n\n#endif // ${guard}\n`;
+
+            // Auto-create the matching .c alongside it (same folder, same
+            // base name) -- but ONLY if nothing already sits at that path.
+            // Never silently overwrite an existing .c just because a
+            // student happened to (re)create its header -- e.g. adding a
+            // header to a .c file that already exists on its own.
+            const dir = filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/') + 1) : '';
+            const base = filename.slice(dir.length, -2); // strip dir and ".h"
+            const companionC = `${dir}${base}.c`;
+            const companionBlocked = newFS[companionC] !== undefined
+                || this.folderExistsAt(companionC, newFS)
+                || this.fileBlockingPath(companionC, newFS);
+            if (!companionBlocked) {
+                newFS[companionC] = `#include "${base}.h"\n`;
+                createdNames.push(companionC);
+            }
+        } else {
+            newFS[filename] = `// New file: ${filename}\n`;
+        }
 
         this.emit({ virtualFS: newFS, currentFile: filename });
         // Same signal EditorUI fires on every keystroke -- AutoSaveUI
@@ -289,7 +329,7 @@ export class FileSystemBloc extends Bloc {
         // clicked SAVE CLOUD manually. File-tree operations are exactly as
         // much "a change worth saving" as typing is.
         globalEventBus.emit('EDITOR_CONTENT_CHANGED');
-        globalEventBus.emit('LOG', { message: `Created ${filename}`, type: 'success' });
+        globalEventBus.emit('LOG', { message: `Created ${createdNames.join(' and ')}`, type: 'success' });
         return true;
     }
 
