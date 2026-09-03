@@ -10,53 +10,38 @@
     <script src="vendor/dapjs/dap.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Playground's Console tab: a real terminal now (node-pty + a
-         WebSocket, see backend/ptySession.js), not a plain scrolling
-         transcript div -- xterm.js is the actual terminal emulator
-         (ANSI/cursor/backspace handling), same pairing VS Code's own
-         integrated terminal uses. See ConsoleUI.js. -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
     <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
     <style>
         :root {
-            /* Sage/olive dark palette (2026-08), now GENERATED (2026-09)
-               from 5 base tokens -- base #262A2B, text #C9C8B6, accent
-               #7D9B8B, success #10b981, danger #f87171 -- via
-               js/core/theme.js's deriveTheme(), not hand-picked one at a
-               time. These values are that function's own output for this
-               exact theme, baked in as the static default so the page
-               still renders correctly with zero JS (deriveTheme() only
-               matters again once a user picks a custom theme -- see that
-               file's own header comment for why these 5 and not the other
-               ~15). Every text/background pair here is verified ≥4.5:1 --
-               run node tools/contrast-check.js's audit, or theme.js's own
-               derivation, to re-check after touching any of these by hand. */
+            /* Sage/olive dark palette (2026-08). Semantic token names given
+               for this palette (--bg-main-surface, --text-title-primary,
+               --btn-primary-bg, etc.) are mapped onto this file's EXISTING
+               CSS var names below -- no new custom properties introduced,
+               everything downstream already reads these. */
             --terminal-bg: #262A2B;
-            --sidebar-bg: #222627;
-            --border-color: #434644;
-            --header-color: #d7d6c8;
+            --sidebar-bg: #1E2223;
+            --border-color: #353B3D;
+            --header-color: #E2E0CF;
             --text-main: #C9C8B6;
-            --text-muted: #8f955a;
-            --log-bg: #242728;
+            --text-muted: #8E948D;
+            --log-bg: #1B1E1F;
 
-            --sidebar-text: #8f955a;
-            --header-text: #d7d6c8;
+            --sidebar-text: #8E948D;
+            --header-text: #8E948D;
             --accent-text: #7D9B8B;
-            --active-bg: #333b39;
+            --active-bg: #2F3B36;
             --active-text: #7D9B8B;
             --active-border: #7D9B8B;
 
-            --btn-blue-bg: #3a3d3c;
-            --btn-blue-text: #C9C8B6;
-            --btn-green-bg: #096647;
-            --btn-green-text: #ffffff;
-            --btn-red-bg: #b50909;
-            --btn-red-text: #ffffff;
+            --btn-blue-bg: #2F3537;
+            --btn-blue-text: #A5ACA4;
+            --btn-green-bg: #3E5A4E;
+            --btn-green-text: #E2E0CF;
+            --btn-red-bg: #450a0a;
+            --btn-red-text: #f87171;
 
             --success-text: #10b981;
             --danger-text: #f87171;
@@ -112,6 +97,7 @@
         #resultsOutput,
         #serialOutput,
         #consolePanel,
+        #consoleOutput,
         .log-box,
         #logBox {
             background-color: var(--log-bg) !important;
@@ -127,22 +113,11 @@
             letter-spacing: 0.06em;
         }
 
-        #editor {
-            width: 100%;
-            height: 100%;
+        #editor { 
+            width: 100%; 
+            height: 100%; 
             border: none;
             background: var(--terminal-bg);
-        }
-
-        /* Ajustes' "Modo Presentación" toggle (see EditorUI.js) -- caps
-           #editor's own width and centers it instead of letting code
-           stretch edge-to-edge, easier to read once projected/screen-
-           shared. max-width wins over the width:100% above regardless of
-           source order (that's just how the two properties interact), so
-           this doesn't need !important. */
-        #editor.presentation-mode {
-            max-width: 900px;
-            margin: 0 auto;
         }
 
         .neon-btn {
@@ -377,42 +352,34 @@
            LIGHT THEME - GOLD / SAND PALETTE (HIGH CONTRAST & ZERO FATIGUE)
            ========================================================= */
         body.light-theme {
-            /* Warm Gold/Sand light palette (2026-08), now GENERATED
-               (2026-09) from 5 base tokens -- base #EDE4B7, text #31302E,
-               accent #31302E (this theme has no distinct accent hue of its
-               own; active/selected state is conveyed by weight/border, not
-               color, and that's preserved here), success #516247, danger
-               #B91C1C -- via js/core/theme.js's deriveTheme(). Same
-               generated-not-hand-picked contract as :root's dark palette
-               above; see that block's own comment. This is also where the
-               two AA fixes from 2026-09 (--sidebar-text/--success-text)
-               ended up: the formula's own ensureContrast() step now
-               guarantees both automatically, for any base tokens, not just
-               these specific hand-fixed hex values. */
+            /* Warm Gold/Sand light palette (2026-08) -- same existing-var
+               mapping convention as :root's dark palette above (semantic
+               names like --btn-primary-bg map onto --btn-green-bg, etc.;
+               no new custom properties introduced). */
             --terminal-bg: #EDE4B7;
-            --sidebar-bg: #d5cda5;
-            --border-color: #cbc49e;
-            --header-color: #252423;
+            --sidebar-bg: #E2D9A7;
+            --border-color: #C8BE93;
+            --header-color: #232220;
             --text-main: #31302E;
-            --text-muted: #5e5638;
-            --log-bg: #dfd6ac;
+            --text-muted: #666157;
+            --log-bg: #E5DBAA;
 
-            --sidebar-text: #5e5638;
-            --header-text: #252423;
+            --sidebar-text: #666157;
+            --header-text: #232220;
             --accent-text: #31302E;
-            --active-bg: #d1c9a2;
+            --active-bg: #F5EFCF;
             --active-text: #31302E;
             --active-border: #31302E;
 
-            --btn-blue-bg: #d6cea7;
+            --btn-blue-bg: #D8CEA0;
             --btn-blue-text: #31302E;
-            --btn-green-bg: #42622f;
+            --btn-green-bg: #40584B;
             --btn-green-text: #EDE4B7;
-            --btn-red-bg: #af1b1b;
-            --btn-red-text: #ffffff;
+            --btn-red-bg: #8B2626;
+            --btn-red-text: #FFFFFF;
 
-            --success-text: #455c37;
-            --danger-text: #a91a1a;
+            --success-text: #55684B;
+            --danger-text: #B91C1C;
 
             --track-bg: rgba(49, 48, 46, 0.07);
             --track-border: rgba(49, 48, 46, 0.16);
@@ -463,6 +430,7 @@
             color: var(--text-muted);
         }
 
+        body.light-theme #docsModal > div > div:first-child,
         body.light-theme #recoveryModal > div > div:first-child,
         body.light-theme #recoveryModal > div > div:last-child {
             background: var(--sidebar-bg) !important;
@@ -544,27 +512,23 @@
         body.light-theme #consolePanel {
             background-color: var(--log-bg) !important;
         }
-        /* xterm.js's own colors (background/foreground/cursor/ANSI palette)
-           come from its `theme` option instead, rebuilt from these same
-           CSS vars on every theme change -- see ConsoleUI.js's
-           refreshXtermTheme(), the same pattern EditorUI.js already uses
-           for Monaco. Plain CSS can't reach into its canvas rendering. */
+        body.light-theme #consoleOutput {
+            background-color: var(--log-bg) !important;
+            color: var(--text-main) !important;
+        }
+        body.light-theme #consoleCommandInput {
+            color: var(--text-main) !important;
+        }
+        body.light-theme #consoleStdinInput {
+            color: var(--text-main) !important;
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden">
     <div class="scanlines" style="z-index: 1;"></div>
 
     <!-- Top Navigation -->
-    <!-- lg:flex-wrap: safety net for the title/button-row split below (title
-         got a much bigger max-w since the mode buttons moved off to the
-         right -- a very wide random ASCII font (see BrandingUI.js, up to
-         ~1040px) plus a busy right-hand row (IDE mode's LINK/UPLOAD/
-         EXAMPLES) can still exceed <nav>'s width right around the lg:
-         breakpoint. Without wrap that would silently overflow the page
-         horizontally (same class of bug the title-row's own flex-wrap
-         below already exists to prevent); with it, the button row just
-         drops to its own line instead. -->
-    <nav class="bg-[var(--sidebar-bg)] px-3 py-1 lg:px-4 lg:py-1 flex flex-col lg:flex-row lg:flex-wrap gap-3 justify-between items-center z-[60] relative">
+    <nav class="bg-[var(--sidebar-bg)] px-3 py-1 lg:px-4 lg:py-1 flex flex-col lg:flex-row gap-3 justify-between items-center z-[60] relative">
         <div class="flex items-center justify-between w-full lg:w-auto">
             <!-- flex-wrap + gap (not the old space-x, which doesn't add
                  vertical spacing across wrapped lines): a real reported bug
@@ -584,39 +548,20 @@
                 </button>
                 <!-- Clips whichever random ASCII-art font (BrandingUI.js)
                      got picked to a fixed box. All three limits measured
-                     directly, not guessed: fonts run 86-1043px wide and
-                     1-11 lines tall (uncapped, <nav> itself jumped 48-80px
-                     tall depending on which loaded). text-[8px], up from
-                     6px: that was too small to render crisply at some real
-                     browser zoom levels.
-                     lg:max-w raised again (2026-09) to comfortably clear
-                     the widest known font (1043px) with room to spare --
-                     a real reported complaint: the previous 640px cap was
-                     still visibly slicing the last few characters off wide
-                     fonts. No longer needs to protect the button row's own
-                     space either way -- that row lives on the opposite
-                     side of the nav now, and lg:flex-wrap catches it
-                     dropping to its own line if the two ever don't fit
-                     side by side.
-                     min(1060px, calc(100vw-80px)), not a flat 1060px:
-                     lg:flex-wrap only solves the title vs. the BUTTON
-                     ROW not fitting together -- it does nothing for the
-                     title alone being wider than the viewport itself,
-                     which a flat 1060px cap could still do at narrower
-                     "barely desktop" widths just past the lg: breakpoint
-                     (confirmed: real page overflow at 1024-1090px with
-                     the widest font, title sitting alone on its own
-                     wrapped line but still wider than that line). The
-                     calc() keeps it viewport-relative so this can't
-                     recur at any width; 80px clears the hamburger
-                     button + padding measured alongside it.
-                     Mobile's cap stays a flat 200px: the title has no
-                     flex-wrap fallback to lean on there (nav's already
-                     flex-col, one thing per row) and 320-375px viewports
-                     are narrow enough that even the calc() approach
-                     would leave almost nothing worth showing anyway. -->
-                <div id="projectTitle" class="retro-header text-[8px] leading-[1] lg:text-[9px] whitespace-pre font-mono overflow-hidden select-none max-w-[200px] lg:max-w-[min(1060px,calc(100vw-80px))] max-h-[40px] lg:max-h-[48px] flex-shrink-0">
+                     directly, not guessed: fonts run 86-1040px wide (wide
+                     enough to push the mode buttons off-screen at ordinary
+                     desktop widths, not just mobile -- hence max-w on
+                     BOTH tiers) and 1-11 lines tall (uncapped, <nav>
+                     itself jumped 48-80px tall depending on which loaded).
+                     text-[8px], up from 6px: that was too small to render
+                     crisply at some real browser zoom levels. -->
+                <div id="projectTitle" class="retro-header text-[8px] leading-[1] lg:text-[9px] whitespace-pre font-mono overflow-hidden select-none max-w-[120px] lg:max-w-[420px] max-h-[40px] lg:max-h-[48px] flex-shrink-0">
                     <!-- Dynamic ASCII Art -->
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0 lg:border-l lg:border-[var(--border-color)] lg:pl-3 lg:ml-1">
+                    <button id="ideModeBtn" class="ascii-tab active">IDE</button>
+                    <button id="learnModeBtn" class="ascii-tab">LEARN</button>
+                    <button id="playgroundModeBtn" class="ascii-tab">PLAYGROUND</button>
                 </div>
             </div>
         </div>
@@ -626,36 +571,14 @@
              ordinary desktop monitor (confirmed by a user report), and
              without the border this row read as a stray floating button
              rather than a second toolbar row. -->
-        <!-- lg:ml-auto: <nav>'s own justify-between already pins this whole
-             row to the right IF it fits alongside the title on one line --
-             but a wide title (see #projectTitle's own comment) can push
-             this row down to its own second line via <nav>'s lg:flex-wrap,
-             and a lone item on a flex line ignores justify-between (no
-             second item to space "between" against), so it would otherwise
-             sit flush-left instead. ml-auto fixes both cases the same way:
-             it consumes whatever's free on this row's own line, wrapped or
-             not. -->
-        <div class="flex items-center gap-2 w-full lg:w-auto lg:ml-auto overflow-x-auto no-scrollbar pb-1 lg:pb-0 pt-2 border-t border-[var(--border-color)] lg:pt-0 lg:border-t-0">
-            <!-- Mode switcher, pinned to the right of the nav (was crammed
-                 right next to the title, leaving it almost no breathing
-                 room -- moved here at the user's own request). Own
-                 top-level destinations, not a dropdown -- see
-                 ModeSwitcherUI.js. -->
-            <div class="flex items-center flex-shrink-0 lg:border-r lg:border-[var(--border-color)] lg:pr-3 lg:mr-1">
-                <button id="ideModeBtn" class="ascii-tab active">IDE</button>
-                <button id="learnModeBtn" class="ascii-tab">LEARN</button>
-                <button id="playgroundModeBtn" class="ascii-tab">PLAYGROUND</button>
-                <button id="settingsModeBtn" class="ascii-tab">AJUSTES</button>
-                <!-- Used to be a [Docs] link that popped #docsModal open on
-                     top of whatever was showing. Once it got its own nav
-                     tab that stopped making sense -- a tab that ALSO opens
-                     a sheet on top of itself. Now a real mode, same as
-                     IDE/LEARN/PLAYGROUND/AJUSTES (see ModeBloc.js/
-                     ModeSwitcherUI.js/#docsPanel below). -->
-                <button id="docsModeBtn" class="ascii-tab">DOCS</button>
-            </div>
+        <div class="flex items-center gap-2 w-full lg:w-auto overflow-x-auto no-scrollbar pb-1 lg:pb-0 pt-2 border-t border-[var(--border-color)] lg:pt-0 lg:border-t-0">
+            <button id="authBtn" class="neon-btn flex-shrink-0 px-3 lg:px-4 py-1.5 lg:py-2 rounded-none text-[10px] font-bold flex items-center gap-2" style="position: relative; z-index: 70;">
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                LOGIN
+            </button>
 
             <div id="ideOnlyNavControls" class="flex items-center gap-2">
+                <div class="h-6 w-px bg-[var(--border-color)] mx-1"></div>
                 <div class="relative flex-shrink-0">
                     <select id="exampleSelector" class="bg-[var(--log-bg)] text-[var(--header-color)] border border-[var(--border-color)] rounded-none px-3 py-1.5 text-[10px] lg:text-xs outline-none cursor-pointer appearance-none pr-8">
                         <option value="">:: EXAMPLES ::</option>
@@ -683,24 +606,6 @@
                 </button>
             </div>
 
-            <!-- LOGIN pinned to the true right edge of the nav (explicit
-                 user request -- it used to sit right after the mode
-                 buttons, ahead of EXAMPLES/LINK/UPLOAD, so it read as
-                 buried in the middle of the row instead of "the account
-                 control"). Simply the last child here, not ml-auto -- this
-                 row is shrink-to-fit (lg:w-auto), so an auto margin has no
-                 slack to push into and (worse, tried this first) just
-                 extends the row's own overflow-x-auto scroll area instead,
-                 leaving the button scrolled off invisibly. Being last
-                 works because <nav> itself has exactly two children and
-                 justify-between, which is what actually pins this whole
-                 row to the far right. -->
-            <div class="h-6 w-px bg-[var(--border-color)] mx-1 flex-shrink-0"></div>
-            <button id="authBtn" class="neon-btn flex-shrink-0 px-3 lg:px-4 py-1.5 lg:py-2 rounded-none text-[10px] font-bold flex items-center gap-2" style="position: relative; z-index: 70;">
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
-                LOGIN
-            </button>
-
         </div>
     </nav>
 
@@ -720,6 +625,15 @@
                 <div class="flex items-center gap-2">
                     <button id="newFileBtn" class="w-5 h-5 bg-[var(--sidebar-bg)] hover:bg-[var(--border-color)] text-[var(--text-main)] border border-[var(--border-color)] flex items-center justify-center font-bold font-mono text-xs transition-all">+</button>
                     <button id="playgroundNewFileBtn" class="hidden w-5 h-5 bg-[var(--sidebar-bg)] hover:bg-[var(--border-color)] text-[var(--text-main)] border border-[var(--border-color)] items-center justify-center font-bold font-mono text-xs transition-all">+</button>
+                    <!-- Opens #sidebarSettingsPanel (see SidebarSettingsUI.js) --
+                         everything that isn't the file tree itself (cloud
+                         save/load, autosave, Docs/Keys/Recovery/Extension,
+                         version) lives behind this now instead of stacked
+                         under the tree, so the tree gets the sidebar's full
+                         height on short viewports. -->
+                    <button id="sidebarSettingsBtn" class="w-5 h-5 bg-[var(--sidebar-bg)] hover:bg-[var(--border-color)] text-[var(--text-main)] border border-[var(--border-color)] flex items-center justify-center transition-all" title="Ajustes">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
                 </div>
             </div>
             <div id="projectBadge" class="flex-shrink-0 mx-3 mt-3 px-1 text-[9px] text-[var(--sidebar-text)] font-bold uppercase tracking-wider truncate" title="Current Workspace Project">
@@ -740,6 +654,85 @@
 
         </div>
 
+        <!-- Sidebar Settings Panel -- everything that isn't the file tree
+             itself, pulled out from under #sidebar's tree so short
+             viewports don't have to squeeze the tree down to fit cloud
+             save/load + autosave + the utility links + version underneath
+             it (a real reported complaint). Floats as position:fixed
+             (see SidebarSettingsUI.js), NOT nested inside #sidebar --
+             #sidebar has overflow-hidden for its own slide-in/out drawer
+             transition, which would clip a popover taller than its box.
+             Opened via #sidebarSettingsBtn (the gear icon next to '+'). -->
+        <div id="sidebarSettingsPanel" class="hidden fixed w-64 max-w-[calc(100vw-1.5rem)] bg-[var(--sidebar-bg)] border border-[var(--border-color)] z-[80] p-4 flex flex-col gap-3 overflow-y-auto">
+                <div id="ideOnlySidebarFooter" class="flex flex-col gap-3">
+                    <button id="downloadBtn" class="neon-btn hidden w-full py-2 text-[10px] rounded-none font-bold flex items-center justify-center gap-2" style="position: relative; z-index: 60;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        DOWNLOAD .BIN
+                    </button>
+                    <button id="downloadZipBtn" class="neon-btn w-full py-2 text-[10px] rounded-none font-bold flex items-center justify-center gap-2" style="position: relative; z-index: 60;">
+                        EXPORT_ZIP
+                    </button>
+
+                    <div class="flex gap-2">
+                        <button id="cloudSaveBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
+                            SAVE CLOUD
+                        </button>
+                        <button id="cloudLoadBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
+                            LOAD CLOUD
+                        </button>
+                    </div>
+                    <label id="autoSaveWrapper" class="hidden items-center gap-2 px-1 -mt-1 cursor-pointer select-none">
+                        <input id="autoSaveToggle" type="checkbox" class="peer sr-only">
+                        <span class="w-3 h-3 border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
+                        <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-70 peer-checked:opacity-100 transition-opacity">Autosave to cloud</span>
+                    </label>
+                </div>
+
+                <!-- Playground's own Save/Load Cloud pair -- separate buttons
+                     (not shared with IDE's) since they write/read a sibling
+                     `playgroundProject` field via a second FileSystemBloc
+                     instance (see app.js). Autosave checkbox mirrors IDE's
+                     exactly (own AutoSaveUI instance, own localStorage key). -->
+                <div id="playgroundOnlySidebarFooter" class="hidden flex-col gap-3">
+                    <div class="flex gap-2">
+                        <button id="playgroundCloudSaveBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
+                            SAVE CLOUD
+                        </button>
+                        <button id="playgroundCloudLoadBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
+                            LOAD CLOUD
+                        </button>
+                    </div>
+                    <label id="playgroundAutoSaveWrapper" class="hidden items-center gap-2 px-1 -mt-1 cursor-pointer select-none">
+                        <input id="playgroundAutoSaveToggle" type="checkbox" class="peer sr-only">
+                        <span class="w-3 h-3 border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
+                        <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-70 peer-checked:opacity-100 transition-opacity">Autosave to cloud</span>
+                    </label>
+                </div>
+
+                <!-- Sidebar Utility Footer -- no border here: in Learn mode
+                     the buttons above are hidden, so this line would sit
+                     directly under the wrapper's own border-t with nothing
+                     between them (a repeated divider). Spacing alone still
+                     separates the two groups when both are visible. -->
+                <div class="flex flex-col gap-2 mt-1 pt-3">
+                    <div class="flex items-center flex-wrap gap-x-3 gap-y-1">
+                        <button id="showDocsBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Hardware Reference">[Docs]</button>
+                        <button id="themeToggle" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Toggle Theme">[<span id="themeIcon">Dark</span>]</button>
+                        <!-- See HotkeysUI.js -- toggles the small key badges
+                             on every hotkey-bound button (hidden by default).
+                             Same '?' key also toggles this. -->
+                        <button id="hotkeysToggleBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors opacity-60" title="Mostrar/ocultar atajos de teclado (o presiona '?')">[Keys]</button>
+                        <button id="recoveryModeBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-red-400 transition-colors" title="Recovery Mode / Mass Erase">[Recovery]</button>
+                        <!-- Restored (2026-08) at the user's request after a
+                             brief removal ("no es necesario andar descargando
+                             la extension") -- plain static download, no JS
+                             handler needed. -->
+                        <a id="downloadExtensionBtn" href="downloads/apm32-baremetal-ext-1.3.2.vsix" download class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Descargar la extensión de VS Code (.vsix)">[Extension]</a>
+                    </div>
+                    <div id="appVersionTag" class="text-[8px] font-mono select-none" style="color: var(--sidebar-text); opacity: 0.4;">v1.3.2</div>
+                </div>
+        </div>
+
         <!-- Main Area -->
         <div id="mainArea" class="flex-grow flex flex-col min-w-0 h-full" style="background-color: var(--terminal-bg);">
             <!-- Specification/Design + mission navigation moved into the
@@ -756,157 +749,6 @@
             <!-- Theory panel (Learn mode, shown via the Theory tab) -->
             <div id="theoryTabPanel" class="hidden flex-grow overflow-hidden min-h-0" style="background-color: var(--terminal-bg);">
                 <div id="theoryContent" class="h-full overflow-y-auto p-6 lg:p-8 md-content" style="background-color: var(--terminal-bg);"></div>
-            </div>
-
-            <!-- Settings, its own top-level destination (ModeSwitcherUI.js)
-                 next to IDE/LEARN/PLAYGROUND -- NOT a dropdown off a gear
-                 icon anymore (a real reported complaint: that "didn't feel
-                 natural to use", tucked into a tiny corner icon). Full-
-                 width page, not squeezed into the sidebar, so there's
-                 actually room to make the color editor and the cloud
-                 controls easy to read instead of cramped.
-                 #ideOnlySidebarFooter/#playgroundOnlySidebarFooter (IDs
-                 kept as-is -- AutoSaveUI/AuthUI/ModeSwitcherUI all still
-                 look them up by these exact names) are BOTH always shown
-                 here regardless of which mode you were in before landing
-                 on this page -- unlike everywhere else those two used to
-                 be mode-gated, there's no "current mode" to gate on once
-                 you've navigated away from IDE/Playground to look at
-                 settings; showing both projects' cloud controls together
-                 is simpler than trying to remember which one you meant. -->
-            <div id="settingsPanel" class="hidden flex-grow overflow-y-auto min-h-0" style="background-color: var(--terminal-bg);">
-                <div class="max-w-2xl mx-auto p-6 lg:p-10 flex flex-col gap-8">
-                    <h1 class="retro-header text-sm tracking-[0.2em] uppercase font-bold text-[var(--header-color)] border-b border-[var(--border-color)] pb-4">
-                        Ajustes
-                    </h1>
-
-                    <section class="flex flex-col gap-3">
-                        <h2 class="text-[10px] font-bold uppercase tracking-widest text-[var(--sidebar-text)] opacity-70">Apariencia</h2>
-                        <div id="themeEditorPane"></div>
-
-                        <!-- Text size: a device-level accessibility control, not
-                             an account color -- see FontScaleUI.js/fontScale.js
-                             for why it's plain localStorage (guest-safe) instead
-                             of ThemeBloc's account-gated persistence. Scales the
-                             whole page via CSS zoom EXCEPT the code editor
-                             (Monaco manages its own font size independently). -->
-                        <div class="flex items-center justify-between pt-3 mt-1 border-t border-[var(--border-color)]">
-                            <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)]">Tamaño de Texto</span>
-                            <div class="flex items-center gap-2">
-                                <button id="fontScaleDecreaseBtn" class="w-6 h-6 flex items-center justify-center border border-[var(--border-color)] text-[var(--sidebar-text)] hover:text-[var(--accent-text)] hover:border-[var(--accent-text)] font-bold text-sm leading-none" title="Reducir tamaño de texto">-</button>
-                                <span id="fontScaleValue" class="text-[9px] font-mono text-[var(--sidebar-text)] w-9 text-center select-none">100%</span>
-                                <button id="fontScaleIncreaseBtn" class="w-6 h-6 flex items-center justify-center border border-[var(--border-color)] text-[var(--sidebar-text)] hover:text-[var(--accent-text)] hover:border-[var(--accent-text)] font-bold text-sm leading-none" title="Aumentar tamaño de texto">+</button>
-                                <button id="fontScaleResetBtn" class="text-[9px] uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] underline ml-1" title="Restablecer tamaño de texto">Reset</button>
-                            </div>
-                        </div>
-
-                        <!-- Centers the code editor in a comfortable reading
-                             column instead of letting it stretch edge-to-edge --
-                             for screen-sharing/projecting in class, where a
-                             full-width line of code run off to a monitor's edge
-                             is harder to read than a shorter, centered one. Not
-                             persisted (see EditorUI.js) -- a "turn it on right
-                             before class, forget about it after" toggle, not a
-                             standing preference. -->
-                        <label id="presentationModeWrapper" class="flex items-center justify-between pt-3 mt-1 border-t border-[var(--border-color)] cursor-pointer select-none">
-                            <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)]">Modo Presentación</span>
-                            <div class="flex items-center gap-2">
-                                <input id="presentationModeToggle" type="checkbox" class="peer sr-only">
-                                <span class="w-3 h-3 border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
-                            </div>
-                        </label>
-                    </section>
-
-                    <section id="ideOnlySidebarFooter" class="flex flex-col gap-3">
-                        <h2 class="text-[10px] font-bold uppercase tracking-widest text-[var(--sidebar-text)] opacity-70">Proyecto IDE</h2>
-                        <button id="downloadBtn" class="neon-btn hidden w-full py-2 text-[10px] rounded-none font-bold flex items-center justify-center gap-2" style="position: relative; z-index: 60;">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                            DOWNLOAD .BIN
-                        </button>
-                        <button id="downloadZipBtn" class="neon-btn w-full py-2 text-[10px] rounded-none font-bold flex items-center justify-center gap-2" style="position: relative; z-index: 60;">
-                            EXPORT_ZIP
-                        </button>
-                        <div class="flex gap-2">
-                            <button id="cloudSaveBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
-                                SAVE CLOUD
-                            </button>
-                            <button id="cloudLoadBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
-                                LOAD CLOUD
-                            </button>
-                        </div>
-                        <label id="autoSaveWrapper" class="hidden items-center gap-2 px-1 -mt-1 cursor-pointer select-none">
-                            <input id="autoSaveToggle" type="checkbox" class="peer sr-only">
-                            <span class="w-3 h-3 border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
-                            <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-70 peer-checked:opacity-100 transition-opacity">Autosave to cloud</span>
-                        </label>
-                    </section>
-
-                    <!-- Playground's own Save/Load Cloud pair -- separate
-                         buttons (not shared with IDE's) since they write/
-                         read a sibling `playgroundProject` field via a
-                         second FileSystemBloc instance (see app.js).
-                         Autosave checkbox mirrors IDE's exactly (own
-                         AutoSaveUI instance, own localStorage key). -->
-                    <section id="playgroundOnlySidebarFooter" class="flex flex-col gap-3">
-                        <h2 class="text-[10px] font-bold uppercase tracking-widest text-[var(--sidebar-text)] opacity-70">Proyecto Playground</h2>
-                        <div class="flex gap-2">
-                            <button id="playgroundCloudSaveBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
-                                SAVE CLOUD
-                            </button>
-                            <button id="playgroundCloudLoadBtn" class="neon-btn flex-1 py-1.5 text-[9px] rounded-none font-bold hidden opacity-50 transition-all" disabled>
-                                LOAD CLOUD
-                            </button>
-                        </div>
-                        <label id="playgroundAutoSaveWrapper" class="hidden items-center gap-2 px-1 -mt-1 cursor-pointer select-none">
-                            <input id="playgroundAutoSaveToggle" type="checkbox" class="peer sr-only">
-                            <span class="w-3 h-3 border-2 border-[var(--border-color)] peer-checked:bg-[var(--active-border)] peer-checked:border-[var(--active-border)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--active-border)] transition-all duration-150 flex-shrink-0"></span>
-                            <span class="text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-70 peer-checked:opacity-100 transition-opacity">Autosave to cloud</span>
-                        </label>
-                    </section>
-
-                    <section class="flex flex-col gap-3">
-                        <h2 class="text-[10px] font-bold uppercase tracking-widest text-[var(--sidebar-text)] opacity-70">Recursos</h2>
-                        <div class="flex items-center flex-wrap gap-x-4 gap-y-2">
-                            <!-- [Docs] moved to the top nav, next to AJUSTES
-                                 (see this file's own nav <button> group) --
-                                 not here anymore. -->
-                            <button id="themeToggle" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Toggle Theme">[<span id="themeIcon">Dark</span>]</button>
-                            <!-- See HotkeysUI.js -- toggles the small key badges
-                                 on every hotkey-bound button (hidden by default).
-                                 Same '?' key also toggles this. -->
-                            <button id="hotkeysToggleBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors opacity-60" title="Mostrar/ocultar atajos de teclado (o presiona '?')">[Keys]</button>
-                            <button id="recoveryModeBtn" class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-red-400 transition-colors" title="Recovery Mode / Mass Erase">[Recovery]</button>
-                            <!-- Restored (2026-08) at the user's request after a
-                                 brief removal ("no es necesario andar descargando
-                                 la extension") -- plain static download, no JS
-                                 handler needed. -->
-                            <a id="downloadExtensionBtn" href="downloads/apm32-baremetal-ext-1.3.2.vsix" download class="text-[9px] font-mono font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)] transition-colors" title="Descargar la extensión de VS Code (.vsix)">[Extension]</a>
-                        </div>
-                        <div id="appVersionTag" class="text-[8px] font-mono select-none" style="color: var(--sidebar-text); opacity: 0.4;">v1.3.2</div>
-                    </section>
-                </div>
-            </div>
-
-            <!-- Docs, now its own top-level destination (ModeSwitcherUI.js)
-                 next to AJUSTES -- was a centered modal opened on top of
-                 whatever was showing (#docsModal); once Docs got its own
-                 nav tab that stopped making sense (a tab that ALSO pops a
-                 sheet on top of itself). Full-width page like Settings,
-                 no backdrop/close button/Escape handler anymore -- leaving
-                 the page is just clicking another mode tab. -->
-            <div id="docsPanel" class="hidden flex-grow overflow-y-auto min-h-0" style="background-color: var(--terminal-bg);">
-                <div class="max-w-4xl mx-auto p-6 lg:p-10 flex flex-col gap-6">
-                    <div class="flex items-center gap-1.5 border-b border-[var(--border-color)] pb-3" id="docTabs">
-                        <button data-doc="PINOUT_APM32.md" class="doc-tab ascii-tab active">PINOUT</button>
-                        <button data-doc="PIN_MODES.md" class="doc-tab ascii-tab">PIN MODES</button>
-                        <button data-doc="TUTORIAL_1.md" class="doc-tab ascii-tab">TUTORIAL 1</button>
-                        <button data-doc="TUTORIAL_2.md" class="doc-tab ascii-tab">TUTORIAL 2</button>
-                        <button data-doc="TUTORIAL_3.md" class="doc-tab ascii-tab">TUTORIAL 3</button>
-                    </div>
-                    <div id="docContent" class="md-content">
-                        <!-- md content -->
-                    </div>
-                </div>
             </div>
         </div> <!-- End of Main Area -->
     </div> <!-- End of Workspace -->
@@ -987,17 +829,30 @@
             <!-- Test Results panel -->
             <div id="resultsOutput" class="hidden p-3 flex-grow overflow-y-auto space-y-3 custom-scrollbar"></div>
 
-            <!-- Terminal (Playground) panel -- a REAL interactive terminal
-                 (xterm.js, fed by a live pty over a WebSocket -- see
-                 ConsoleUI.js/backend/ptySession.js), not a request/response
-                 transcript. Typing while a program is running sends
-                 keystrokes straight to it, same as any real terminal --
-                 there's no separate stdin box anymore. p-2 padding here
-                 (not on the xterm mount itself) because xterm.js sizes its
-                 own canvas to fill its container exactly; padding on the
-                 mount would just get rendered over. -->
-            <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow p-2" style="background: var(--log-bg);">
-                <div id="consoleXtermMount" class="flex-grow min-h-0"></div>
+            <!-- Terminal (Playground) panel -- a real command transcript,
+                 not a log feed: each line is either the "$ <command>" the
+                 student typed or raw stdout/stderr from executing it. The
+                 prompt lives at the BOTTOM, like a real terminal, instead
+                 of a text box up in the tab header (see ConsoleUI.js). -->
+            <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow">
+                <div id="consoleOutput" class="flex-grow min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed bg-[var(--log-bg)] custom-scrollbar"></div>
+                <!-- Optional stdin for the NEXT command -- each run is a
+                     fresh, non-interactive sandbox process (see
+                     ConsoleUI.js), so there's no way to type more input
+                     WHILE a program like scanf()/getchar() is already
+                     running and waiting. This is the workaround: whatever
+                     is here gets fed to the program's stdin from the
+                     start, one line per read. Collapsed by default --
+                     most commands (gcc, ls, ./prog with no input) don't
+                     need it. -->
+                <div class="border-t border-[var(--border-color)] bg-[var(--log-bg)] flex-shrink-0">
+                    <button id="consoleStdinToggle" class="w-full text-left px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-60 hover:opacity-100 transition-opacity" title="Texto que se envía como entrada estándar (stdin) al programa que corras a continuación">[+] Stdin</button>
+                    <textarea id="consoleStdinInput" rows="2" placeholder="Entrada para scanf/getchar/gets del próximo programa que corras -- una línea por lectura" spellcheck="false" class="hidden w-full resize-y bg-transparent font-mono text-[11px] text-[var(--text-main)] px-3 pb-2 focus:outline-none placeholder:opacity-40"></textarea>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-2 flex-shrink-0 border-t border-[var(--border-color)] bg-[var(--log-bg)]">
+                    <span class="font-mono text-[11px] font-bold text-[var(--accent-text)] select-none">$</span>
+                    <input id="consoleCommandInput" type="text" placeholder="gcc main.c -o prog && ./prog" spellcheck="false" autocomplete="off" class="flex-grow bg-transparent font-mono text-[11px] text-[var(--text-main)] focus:outline-none placeholder:opacity-40">
+                </div>
             </div>
         </div>
 
@@ -1052,6 +907,22 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <!-- Docs Modal -->
+    <div id="docsModal" class="fixed inset-0 bg-black/90 z-[100] hidden flex items-center justify-center p-3 lg:p-8">
+        <div class="bg-[var(--terminal-bg)] w-full max-w-5xl h-full rounded-none border border-[var(--border-color)] flex flex-col overflow-hidden">
+            <div class="flex items-center justify-between bg-[var(--terminal-bg)] border-b border-[var(--border-color)] px-3 py-2">
+                <div class="flex items-center gap-1.5" id="docTabs">
+                    <button data-doc="PINOUT_APM32.md" class="doc-tab ascii-tab active">PINOUT</button>
+                    <button data-doc="TUTORIAL_1.md" class="doc-tab ascii-tab">TUTORIAL 1</button>
+                    <button data-doc="TUTORIAL_2.md" class="doc-tab ascii-tab">TUTORIAL 2</button>
+                </div>
+                <button id="closeDocsBtn" class="neon-btn px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] hover:text-[var(--accent-text)]">CLOSE [ESC]</button>
+            </div>
+            <div id="docContent" class="flex-grow overflow-y-auto p-6 lg:p-10 md-content bg-[var(--terminal-bg)]">
+                <!-- md content -->
+            </div>
+        </div>
+    </div>
 
     <!-- Recovery Modal -->
     <div id="recoveryModal" class="fixed inset-0 bg-black/90 z-[110] hidden flex items-center justify-center p-4">
