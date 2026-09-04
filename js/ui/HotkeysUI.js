@@ -26,17 +26,26 @@
  * either back out, special-cased before the isTypingContext() guard since
  * that's the one place it needs to fire FROM inside a typing context.
  *
- * serialSendBtn and the Docs/Recovery modals' own Escape-to-close
- * (DocsUI.js/HardwareUI.js) are intentionally not duplicated here.
+ * `v` (presentation mode) is ALSO special-cased rather than a REGISTRY
+ * entry, for the opposite reason `i`/`j` are: its checkbox
+ * (#presentationModeToggle) DOES exist as a real clickable element, but
+ * it lives on the Ajustes page -- REGISTRY's firstVisibleEnabled() check
+ * would only ever find it while already sitting on Ajustes, exactly
+ * backwards from "toggle it while looking at code".
+ *
+ * serialSendBtn and the Recovery modal's own Escape-to-close
+ * (HardwareUI.js) are intentionally not duplicated here -- Docs stopped
+ * being a modal in 2026-09 (own mode/tab now, see ModeBloc.js).
  */
 const REGISTRY = [
     // Global -- always relevant regardless of mode.
     { key: '1', ids: ['ideModeBtn'], label: 'Modo IDE' },
     { key: '2', ids: ['learnModeBtn'], label: 'Modo Learn' },
     { key: '3', ids: ['playgroundModeBtn'], label: 'Modo Playground' },
+    { key: '4', ids: ['settingsModeBtn'], label: 'Ajustes' },
+    { key: '5', ids: ['docsModeBtn'], label: 'Docs' },
     { key: 'm', ids: ['mobileMenuBtn'], label: 'Menú de archivos (móvil)' },
     { key: 't', ids: ['themeToggle'], label: 'Tema claro/oscuro' },
-    { key: 'd', ids: ['showDocsBtn'], label: 'Documentación' },
     { key: 'l', ids: ['authBtn'], label: 'Login / Logout' },
     { key: 'p', ids: ['toggleTerminalBtn'], label: 'Colapsar/expandir terminal (panel)' },
     { key: 'e', shift: true, ids: ['recoveryModeBtn'], label: 'Recovery mode' },
@@ -65,6 +74,7 @@ const EXTRA_LIST_ENTRIES = [
     { keys: 'O / Shift+O', label: 'Cambiar pestaña de la terminal' },
     { keys: 'I', label: 'Entrar al editor' },
     { keys: 'J', label: 'Entrar a la terminal' },
+    { keys: 'V', label: 'Modo presentación (código centrado)' },
     { keys: 'Esc', label: 'Salir del editor/terminal' },
     { keys: '?', label: 'Mostrar/ocultar esta lista' },
 ];
@@ -80,11 +90,17 @@ function focusEditor() {
 }
 
 // Whichever of these actually has something to type into right now --
-// consoleCommandInput (Playground's Terminal tab) or serialInput (Serial
-// Monitor tab, IDE mode) -- offsetParent also rules out a tab that's
-// merely present in the DOM but not the one currently showing.
+// the live terminal's own hidden input (Playground's Terminal tab -- see
+// ConsoleUI.js; xterm.js listens on this textarea for every keystroke, so
+// focusing it IS focusing the terminal, there's no separate command-input
+// element anymore) or serialInput (Serial Monitor tab, IDE mode) --
+// offsetParent also rules out a tab that's merely present in the DOM but
+// not the one currently showing.
 function focusableTerminalInput() {
-    const candidates = [document.getElementById('consoleCommandInput'), document.getElementById('serialInput')];
+    const candidates = [
+        document.querySelector('#consoleXtermMount .xterm-helper-textarea'),
+        document.getElementById('serialInput'),
+    ];
     return candidates.find(el => el && el.offsetParent !== null) || null;
 }
 
@@ -226,6 +242,25 @@ export function initHotkeys() {
         closeList();
     });
 
+    // CAPTURE phase, separate from the main bubble-phase listener below --
+    // xterm.js's own textarea handler treats Escape as a real byte to send
+    // to the shell (a genuine VT100 control code, not just a browser
+    // shortcut) and calls stopPropagation() on it, so a bubble-phase
+    // listener on window never sees the keydown at all while the terminal
+    // has focus. Capturing it on the way DOWN, before xterm's own handler
+    // ever runs, is the only way this exit-the-terminal shortcut can still
+    // fire. Scoped tightly to exactly that one case (Escape + terminal
+    // input focused) so it can't interfere with anything else xterm does
+    // with its own keystrokes.
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || e.repeat) return;
+        const active = document.activeElement;
+        const termInput = focusableTerminalInput();
+        if (active && termInput && active === termInput) {
+            active.blur();
+        }
+    }, true);
+
     window.addEventListener('keydown', (e) => {
         if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -255,6 +290,26 @@ export function initHotkeys() {
         if (key === 'j') {
             const input = focusableTerminalInput();
             if (input) { e.preventDefault(); input.focus(); }
+            return;
+        }
+        if (key === 'v') {
+            // Special-cased, not a REGISTRY entry: its checkbox
+            // (#presentationModeToggle) lives on the Ajustes page, so
+            // REGISTRY's usual firstVisibleEnabled() check (offsetParent
+            // !== null) would only let this fire while already sitting on
+            // Ajustes -- exactly backwards from how it's actually meant to
+            // be used (toggled while looking at code in IDE/Learn/
+            // Playground, not from the settings page). Toggling it
+            // directly here works regardless of which mode is showing.
+            // Setting .checked programmatically doesn't fire 'change' on
+            // its own (unlike a real .click()), so that's dispatched by
+            // hand to reach EditorUI.js's own listener.
+            const toggle = document.getElementById('presentationModeToggle');
+            if (toggle) {
+                e.preventDefault();
+                toggle.checked = !toggle.checked;
+                toggle.dispatchEvent(new Event('change'));
+            }
             return;
         }
 

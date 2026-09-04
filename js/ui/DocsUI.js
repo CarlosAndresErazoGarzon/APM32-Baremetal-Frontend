@@ -1,48 +1,28 @@
 /**
  * DocsUI.js
- * Handles the documentation modal (Pinout / Tutorials), rendered from Markdown
- * files served alongside the app and parsed with the globally-loaded `marked` lib.
+ * Handles the Docs page (Pinout / Tutorials), rendered from Markdown files
+ * served alongside the app and parsed with the globally-loaded `marked`
+ * lib. Used to be a modal opened via a [Docs] button (open()/close()/an
+ * Escape handler); now Docs is its own top-level mode (see ModeBloc.js/
+ * ModeSwitcherUI.js), so this class only owns the tab-switching and
+ * content-loading inside #docsPanel -- visibility of the panel itself is
+ * ModeSwitcherUI's job, same as #settingsPanel.
  */
 export class DocsUI {
     constructor() {
-        this.modal = document.getElementById('docsModal');
-        this.showBtn = document.getElementById('showDocsBtn');
-        this.closeBtn = document.getElementById('closeDocsBtn');
         this.content = document.getElementById('docContent');
         this.tabsContainer = document.getElementById('docTabs');
 
         this.initEventListeners();
+        this.loadDoc('PINOUT_APM32.md');
     }
 
     initEventListeners() {
-        if (this.showBtn) {
-            this.showBtn.onclick = () => {
-                this.open();
-                this.loadDoc('PINOUT_APM32.md');
-            };
-        }
-
-        if (this.closeBtn) {
-            this.closeBtn.onclick = () => this.close();
-        }
-
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') this.close();
-        });
-
         if (this.tabsContainer) {
             this.tabsContainer.querySelectorAll('.doc-tab').forEach(tab => {
                 tab.onclick = () => this.loadDoc(tab.dataset.doc, tab);
             });
         }
-    }
-
-    open() {
-        if (this.modal) this.modal.classList.remove('hidden');
-    }
-
-    close() {
-        if (this.modal) this.modal.classList.add('hidden');
     }
 
     async loadDoc(file, el) {

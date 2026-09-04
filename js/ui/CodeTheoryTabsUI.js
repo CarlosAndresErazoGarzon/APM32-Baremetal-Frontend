@@ -22,6 +22,18 @@ export class CodeTheoryTabsUI {
     }
 
     render() {
+        // ModeSwitcherUI owns #settingsPanel/#docsPanel and everything
+        // else for Settings/Docs mode, but #editorContainer/#theoryTabPanel
+        // have always been THIS class's job -- so hiding both here is what
+        // actually keeps the editor from sitting on top of (or peeking out
+        // from behind) those pages, not just leaving them at whatever
+        // state the previous mode left them in.
+        if (this.modeBloc.state.mode === 'settings' || this.modeBloc.state.mode === 'docs') {
+            if (this.editorContainer) this.editorContainer.classList.add('hidden');
+            if (this.theoryTabPanel) this.theoryTabPanel.classList.add('hidden');
+            return;
+        }
+
         const inLearnMode = this.modeBloc.state.mode === 'learn';
         const showTheory = inLearnMode && this.learnBloc.state.currentView === 'theory';
 
