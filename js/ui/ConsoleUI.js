@@ -181,7 +181,23 @@ export class ConsoleUI {
                 this.term.write('\r\n\x1b[90m[reconnected]\x1b[0m\r\n');
             }
             const files = { ...this.playgroundFsBloc.state.virtualFS };
-            this.sendWs({ type: 'start', files, cwd: this.lastCwd });
+            // cols/rows here, not left for a later 'resize' message: a
+            // real reported bug -- the pty always spawned at a hardcoded
+            // 80x24 (see ptySession.js) and only got resized if term's
+            // OWN onResize fired, which it doesn't for a redundant
+            // resize() call (xterm.js skips firing it when the computed
+            // size already matches what's internally set) -- and the
+            // FIRST real fit(), computed in initTerminal() before this.ws
+            // even exists, already set term's internal cols/rows once,
+            // silently, with nowhere to send it. Net effect: bash wrapped
+            // long lines against 80 columns while xterm rendered at
+            // whatever the container's ACTUAL width was, and the two
+            // disagreeing about where the line wraps is exactly what
+            // made the cursor visibly jump mid-line and scramble the
+            // redraw. Sending the real size with 'start' spawns the pty
+            // already correct from its very first prompt, instead of
+            // hoping a resize message shows up later.
+            this.sendWs({ type: 'start', files, cwd: this.lastCwd, cols: this.term?.cols, rows: this.term?.rows });
         };
 
         this.ws.onmessage = (ev) => {
