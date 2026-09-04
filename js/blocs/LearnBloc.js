@@ -2,6 +2,7 @@ import { Bloc } from '../core/Bloc.js';
 import { globalEventBus } from '../core/EventBus.js';
 import { parseGccErrors } from '../core/gccErrorParser.js';
 import { compileToWasm, runWasmModule } from '../core/WasmToolchain.js';
+import { guestScopedStorage } from '../core/guestStorage.js';
 
 // Both keys take a `namespace` -- null/undefined for the anonymous/guest
 // bucket, a Firebase uid once signed in (see LearnBloc.setNamespace()).
@@ -9,9 +10,19 @@ import { compileToWasm, runWasmModule } from '../core/WasmToolchain.js';
 // (no `_guest` suffix) so anyone who already had local progress before
 // this change doesn't lose it. Without this, two different Google
 // accounts signed into the same browser -- or a signed-in account and a
-// later guest -- would read and write the exact same localStorage keys
-// and silently inherit each other's in-progress edits and pass/fail
-// state, which is the bug this namespacing exists to close.
+// later guest -- would read and write the exact same keys and silently
+// inherit each other's in-progress edits and pass/fail state, which is
+// the bug this namespacing exists to close.
+//
+// guestScopedStorage(namespace), not bare localStorage: a SEPARATE, later
+// reported bug -- even with the namespacing above, every guest still
+// shared the SAME "..._guest"-less bucket via localStorage, which
+// survives indefinitely on a shared lab computer. The next student to
+// open the browser without logging in inherited whatever the PREVIOUS
+// guest had typed. guestScopedStorage keeps localStorage for a real
+// account (already safely isolated by uid) but uses sessionStorage for a
+// guest -- still there after a reload of the same tab, gone once the
+// tab/window closes. See that file's own comment for the full reasoning.
 const PROGRESS_KEY_BASE = 'apm32_learn_progress';
 const progressKey = (namespace) => namespace ? `${PROGRESS_KEY_BASE}_${namespace}` : PROGRESS_KEY_BASE;
 const draftKey = (namespace, unitId, exerciseId) => {
@@ -40,7 +51,7 @@ export class LearnBloc extends Bloc {
         // knows who's signed in (see AUTH_LOGIN below).
         let progress = {};
         try {
-            progress = JSON.parse(localStorage.getItem(progressKey(this.namespace)) || '{}');
+            progress = JSON.parse(guestScopedStorage(this.namespace).getItem(progressKey(this.namespace)) || '{}');
         } catch {
             progress = {};
         }
@@ -96,7 +107,7 @@ export class LearnBloc extends Bloc {
 
         let progress = {};
         try {
-            progress = JSON.parse(localStorage.getItem(progressKey(this.namespace)) || '{}');
+            progress = JSON.parse(guestScopedStorage(this.namespace).getItem(progressKey(this.namespace)) || '{}');
         } catch {
             progress = {};
         }
@@ -108,7 +119,7 @@ export class LearnBloc extends Bloc {
         // away and back.
         const { currentUnitId, currentExercise } = this.state;
         if (currentUnitId && currentExercise) {
-            const draft = localStorage.getItem(draftKey(this.namespace, currentUnitId, currentExercise.id));
+            const draft = guestScopedStorage(this.namespace).getItem(draftKey(this.namespace, currentUnitId, currentExercise.id));
             if (draft !== null) {
                 this.emit({ code: draft });
             } else {
@@ -138,7 +149,7 @@ export class LearnBloc extends Bloc {
             // plain overwrite, which is correct there because file content
             // genuinely can conflict.
             const merged = { ...cloudProgress, ...this.state.progress };
-            localStorage.setItem(progressKey(this.namespace), JSON.stringify(merged));
+            guestScopedStorage(this.namespace).setItem(progressKey(this.namespace), JSON.stringify(merged));
             this.emit({ progress: merged });
             // Push the merged result back up immediately -- covers "had
             // local-only progress before ever logging in" by syncing it to
@@ -202,7 +213,7 @@ export class LearnBloc extends Bloc {
             const theoryMd = await theoryRes.text();
             const starterCode = await starterRes.text();
 
-            const draft = localStorage.getItem(draftKey(this.namespace, unitId, exercise.id));
+            const draft = guestScopedStorage(this.namespace).getItem(draftKey(this.namespace, unitId, exercise.id));
             const code = draft !== null ? draft : starterCode;
 
             this.emit({
@@ -246,7 +257,7 @@ export class LearnBloc extends Bloc {
             if (!starterRes.ok) throw new Error('Error al cargar ejercicio');
             const starterCode = await starterRes.text();
 
-            const draft = localStorage.getItem(draftKey(this.namespace, unitId, exercise.id));
+            const draft = guestScopedStorage(this.namespace).getItem(draftKey(this.namespace, unitId, exercise.id));
             const code = draft !== null ? draft : starterCode;
 
             this.emit({
@@ -270,7 +281,7 @@ export class LearnBloc extends Bloc {
         const exercise = this.state.currentExercise;
 
         try {
-            localStorage.removeItem(draftKey(this.namespace, unitId, exercise.id));
+            guestScopedStorage(this.namespace).removeItem(draftKey(this.namespace, unitId, exercise.id));
             const starterRes = await fetch(`learn-levels/${unitId}/${exercise.starterFile}`);
             if (!starterRes.ok) throw new Error('Failed to fetch starter code');
             const starterCode = await starterRes.text();
@@ -289,7 +300,7 @@ export class LearnBloc extends Bloc {
 
     saveDraft() {
         if (!this.state.currentUnitId || !this.state.currentExerciseId) return;
-        localStorage.setItem(draftKey(this.namespace, this.state.currentUnitId, this.state.currentExerciseId), this.state.code);
+        guestScopedStorage(this.namespace).setItem(draftKey(this.namespace, this.state.currentUnitId, this.state.currentExerciseId), this.state.code);
     }
 
     // Compiles+runs entirely in the browser (vendored wasm-clang -- see
@@ -382,7 +393,7 @@ export class LearnBloc extends Bloc {
 
             if (result.allPassed) {
                 const newProgress = { ...this.state.progress, [levelKey]: true };
-                localStorage.setItem(progressKey(this.namespace), JSON.stringify(newProgress));
+                guestScopedStorage(this.namespace).setItem(progressKey(this.namespace), JSON.stringify(newProgress));
                 this.emit({ isGrading: false, lastResult: result, progress: newProgress });
                 globalEventBus.emit('LOG', { message: 'Pruebas completadas exitosamente!', type: 'success' });
                 // Cloud sync is opt-out-free (unlike the IDE project's

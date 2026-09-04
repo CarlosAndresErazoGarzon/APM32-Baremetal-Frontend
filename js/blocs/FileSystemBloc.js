@@ -1,5 +1,6 @@
 import { Bloc } from '../core/Bloc.js';
 import { globalEventBus } from '../core/EventBus.js';
+import { guestScopedStorage } from '../core/guestStorage.js';
 
 export class FileSystemBloc extends Bloc {
     // Both params optional -- the existing IDE-mode call site (`new
@@ -122,7 +123,10 @@ export class FileSystemBloc extends Bloc {
 
     readLocalDraft() {
         try {
-            const raw = localStorage.getItem(this.localDraftKey());
+            // guestScopedStorage: a guest's draft lives in sessionStorage,
+            // not localStorage -- see that file's own comment for the real
+            // shared-computer bug this avoids.
+            const raw = guestScopedStorage(this.namespace).getItem(this.localDraftKey());
             return raw ? JSON.parse(raw) : null;
         } catch {
             return null;
@@ -131,14 +135,14 @@ export class FileSystemBloc extends Bloc {
 
     persistLocal() {
         try {
-            localStorage.setItem(this.localDraftKey(), JSON.stringify({
+            guestScopedStorage(this.namespace).setItem(this.localDraftKey(), JSON.stringify({
                 virtualFS: this.state.virtualFS,
                 currentFile: this.state.currentFile
             }));
         } catch {
-            // Quota exceeded or localStorage unavailable (private browsing,
-            // etc.) -- local persistence is a convenience, not something
-            // worth surfacing an error for.
+            // Quota exceeded or localStorage/sessionStorage unavailable
+            // (private browsing, etc.) -- local persistence is a
+            // convenience, not something worth surfacing an error for.
         }
     }
 

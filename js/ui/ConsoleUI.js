@@ -62,6 +62,10 @@ export class ConsoleUI {
         // batch flow's cwd round-trip, just sourced from the live pty's
         // actual OS-level cwd instead of parsing a marker out of stdout.
         this.lastCwd = '';
+        // The exact file snapshot last SENT to the server (via 'start' or
+        // 'sync'), not a fresh re-read of live bloc state -- see the
+        // 'files' handler's own comment for the real bug this fixes.
+        this.lastSyncedFiles = {};
 
         this.initTerminal();
         this.initEventListeners();
@@ -143,6 +147,7 @@ export class ConsoleUI {
             clearTimeout(syncTimer);
             syncTimer = setTimeout(() => {
                 const files = { ...this.playgroundFsBloc.state.virtualFS };
+                this.lastSyncedFiles = files;
                 this.sendWs({ type: 'sync', files });
             }, FILE_SYNC_DEBOUNCE_MS);
         });
@@ -181,6 +186,7 @@ export class ConsoleUI {
                 this.term.write('\r\n\x1b[90m[reconnected]\x1b[0m\r\n');
             }
             const files = { ...this.playgroundFsBloc.state.virtualFS };
+            this.lastSyncedFiles = files;
             // cols/rows here, not left for a later 'resize' message: a
             // real reported bug -- the pty always spawned at a hardcoded
             // 80x24 (see ptySession.js) and only got resized if term's
@@ -207,8 +213,32 @@ export class ConsoleUI {
             if (msg.type === 'data') {
                 if (this.term) this.term.write(msg.data);
             } else if (msg.type === 'files') {
-                const files = { ...this.playgroundFsBloc.state.virtualFS };
-                this.playgroundFsBloc.mergeChangedFiles(files, msg.outputFiles);
+                // The REAL, reported bug this fixes: the cursor jumping to
+                // the start of the file and swallowing a keystroke there,
+                // while actively typing. Root cause -- mergeChangedFiles()
+                // is meant to answer "did the terminal/a compiled program
+                // change a file underneath us" (a genuine external write),
+                // but a fresh `{...virtualFS}` read here compares the
+                // server's echo against whatever the editor holds RIGHT
+                // NOW -- which, for the file being actively typed into, is
+                // ALWAYS ahead of what the 2-second-old poll snapshot the
+                // server just sent back reflects. Every single poll tick
+                // during typing looked like "an external change" purely
+                // because of that lag, so EditorUI's own contentChanged
+                // check (see renderMode()) kept calling editor.setValue()
+                // with the STALE content -- which both reverted whatever
+                // was typed in the last ~2s AND reset Monaco's cursor to
+                // (1,1) as setValue()'s own side effect, right where the
+                // student's next keystroke then landed.
+                // Comparing against this.lastSyncedFiles instead (the
+                // EXACT snapshot last actually sent to the server, not a
+                // live re-read) fixes this correctly: it only looks like
+                // a change when the server's content differs from what we
+                // ourselves told it, which is genuinely true for a file
+                // the terminal/a program wrote to, and genuinely false
+                // for an echo of the student's own typing racing ahead of
+                // the server's last poll.
+                this.playgroundFsBloc.mergeChangedFiles(this.lastSyncedFiles, msg.outputFiles);
                 this.playgroundFsBloc.setBinaryNames(Object.keys(msg.binaryFiles || {}));
             } else if (msg.type === 'exit') {
                 if (typeof msg.cwd === 'string') this.lastCwd = msg.cwd;
