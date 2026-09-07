@@ -125,6 +125,45 @@ All three tutorials so far use `MODE = 11` (50MHz) for every output pin -- there
 
 ---
 
+## Step 3: Read or Write the Pin (`IDATA` / `ODATA`)
+
+`CFGLOW`/`CFGHIG` only ever configure a pin -- they don't move any real electrical signal. Once that's done, each port has two SEPARATE one-bit-per-pin registers for actually using it, and which one applies depends entirely on the `MODE` you picked in Step 1.
+
+### Output pins -- write `ODATA`
+
+Once a pin is `MODE = 01`/`10`/`11` (any Output), `ODATA` is what the CPU drives it with:
+
+```c
+GPIOB->ODATA |=  (1 << 11); // Set HIGH (3.3V)
+GPIOB->ODATA &= ~(1 << 11); // Set LOW (0V)
+GPIOB->ODATA ^=  (1 << 11); // Toggle
+```
+
+This is exactly what every LED (Tutorial 1), 7-segment digit (Tutorial 2), and relay (Tutorial 3) in this course already does -- the classic blink example's `GPIOB->ODATA ^= (1 << 2);` is the SAME instruction as the line above, just with `^=` for toggling instead of a fixed HIGH/LOW.
+
+### Input pins -- read `IDATA`
+
+Once a pin is `MODE = 00` (Input, any `CNF`), `IDATA` is where the CPU reads its current voltage:
+
+```c
+if (GPIOB->IDATA & (1 << 10)) {
+    // Pin is currently HIGH
+}
+```
+
+Tutorial 1's buttons use the inverted form of this -- `!(GPIOB->IDATA & (1 << 10))` -- because they're wired with the internal pull-up active (see the note below), so "pressed" reads as a `0`, not a `1`.
+
+> [!NOTE]
+> **`ODATA` has a second job on Input Pull-up/Pull-down pins (`CNF = 10`).**
+> On an Input pin there's no output to drive, so `ODATA` stops meaning "set the voltage" and instead **picks which internal resistor gets enabled**:
+> ```c
+> GPIOB->ODATA |=  (1 << 10); // Pull-UP
+> GPIOB->ODATA &= ~(1 << 10); // Pull-DOWN
+> ```
+> `IDATA` still just reads the real pin voltage either way -- this is the SAME register as the output case above doing something completely different, because the pin's `MODE`/`CNF` changes what that bit is even wired to internally. This is exactly what Tutorial 1's button setup (and `PINOUT_APM32.md`'s own GPIO Quick Reference) already does.
+
+---
+
 ## Quick Reference: Full Hex Codes
 
 Combining both fields gives the actual value you write to `CFGLOW`/`CFGHIG`. The ones marked **used** are the ones you've already written in Tutorials 1-3:
