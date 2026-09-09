@@ -66,6 +66,7 @@ export class ConsoleUI {
         // 'sync'), not a fresh re-read of live bloc state -- see the
         // 'files' handler's own comment for the real bug this fixes.
         this.lastSyncedFiles = {};
+        this.syncTimer = null;
 
         this.initTerminal();
         this.initEventListeners();
@@ -114,7 +115,38 @@ export class ConsoleUI {
         // specially -- Ctrl+C, arrow keys, backspace) goes straight to the
         // pty as raw bytes; bash's own readline on the other end is what
         // makes backspace/history/Ctrl+C work, not anything client-side.
-        this.term.onData(data => this.sendWs({ type: 'input', data }));
+        //
+        // Enter (\r) flushes any pending sync FIRST, real reported bug:
+        // compiling/running a command in the SAME breath as finishing an
+        // edit (a totally normal workflow -- type, hit Enter to compile)
+        // raced the 500ms debounce below. Within that window the server's
+        // jobDir still had the file's PREVIOUS content, so the command ran
+        // against stale code -- missing the student's last few lines, or
+        // "No such file" entirely for a file just created. Flushing
+        // synchronously before forwarding Enter means the 'sync' WS
+        // message is always enqueued (and processed server-side) before
+        // the keystroke that actually triggers the command -- WebSocket
+        // preserves per-connection message order, so this isn't just a
+        // shorter race window, it's not a race at all anymore.
+        //
+        // Gated on this.syncTimer actually being armed -- an earlier
+        // version flushed on every single Enter unconditionally, which
+        // sounds harmless but isn't: flushSync() unconditionally
+        // fs.writeFileSync()s every project file server-side
+        // (writeFilesIntoDir has no unchanged-file skip), and the WS
+        // handler/syncFiles() are fully synchronous, blocking Node's ONE
+        // event loop for every connected session. A running program that
+        // just reads a few lines of input (a menu loop, several scanf()
+        // prompts) would otherwise re-trigger that full disk write on
+        // EVERY Enter, with nothing having actually changed since the
+        // last sync -- exactly the per-keystroke server cost the 500ms
+        // debounce exists to prevent in the first place. Only flushing
+        // when a debounce is actually pending keeps the fix scoped to the
+        // real race (Enter arriving before a genuinely unsynced edit).
+        this.term.onData(data => {
+            if ((data.includes('\r') || data.includes('\n')) && this.syncTimer) this.flushSync();
+            this.sendWs({ type: 'input', data });
+        });
         this.term.onResize(({ cols, rows }) => this.sendWs({ type: 'resize', cols, rows }));
 
         window.addEventListener('resize', () => this.safeFit());
@@ -141,15 +173,10 @@ export class ConsoleUI {
         // change came from IDE/Learn's own unrelated editor. Gated on
         // connectStarted so it's silent until the student has actually
         // opened the terminal at least once.
-        let syncTimer = null;
         globalEventBus.on('EDITOR_CONTENT_CHANGED', () => {
             if (!this.connectStarted) return;
-            clearTimeout(syncTimer);
-            syncTimer = setTimeout(() => {
-                const files = { ...this.playgroundFsBloc.state.virtualFS };
-                this.lastSyncedFiles = files;
-                this.sendWs({ type: 'sync', files });
-            }, FILE_SYNC_DEBOUNCE_MS);
+            clearTimeout(this.syncTimer);
+            this.syncTimer = setTimeout(() => this.flushSync(), FILE_SYNC_DEBOUNCE_MS);
         });
 
         // Monaco isn't the only thing that can't read CSS custom properties
@@ -162,6 +189,27 @@ export class ConsoleUI {
         // 'resize' event on window, so xterm's cached cols/rows would
         // otherwise silently go stale.
         globalEventBus.on('FONT_SCALE_CHANGED', () => this.safeFit());
+    }
+
+    // Sends the CURRENT editor state to the server right now, canceling
+    // any still-pending debounced sync (there's nothing left to wait for
+    // once this fires). Called both by the debounce timer itself and, more
+    // importantly, by term.onData's Enter-key interception above -- see
+    // that comment for the race this closes.
+    flushSync() {
+        if (!this.connectStarted) return;
+        clearTimeout(this.syncTimer);
+        // Not just clearTimeout -- this.syncTimer doubles as "is there
+        // actually a pending edit to send" for term.onData's Enter check
+        // above. clearTimeout() alone leaves it holding a stale (already-
+        // fired-or-cancelled) timer id, which is truthy forever after the
+        // FIRST edit ever made -- nulling it out here is what lets that
+        // check tell "nothing changed since the last sync" apart from
+        // "an edit is still waiting to go out".
+        this.syncTimer = null;
+        const files = { ...this.playgroundFsBloc.state.virtualFS };
+        this.lastSyncedFiles = files;
+        this.sendWs({ type: 'sync', files });
     }
 
     safeFit() {
