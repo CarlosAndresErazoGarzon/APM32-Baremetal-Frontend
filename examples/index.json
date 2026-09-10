@@ -11,10 +11,16 @@
         "description": "Interactive serial communication. Echoes back received characters and reports system uptime every 2 seconds.",
         "files": ["src/main.c", "src/apm32_config.c", "src/uart.c", "src/delay.c", "inc/apm32_config.h", "inc/uart.h", "inc/delay.h"] 
     },
-    { 
-        "id": "led_sequence", 
-        "name": "LED Progress Sequence", 
+    {
+        "id": "led_sequence",
+        "name": "LED Progress Sequence",
         "description": "Progressive sequence using pins PB12-PB15. Demonstrates sequential I/O control and multi-pin configuration.",
-        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"] 
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "relay",
+        "name": "Relay Module (Tutorial 3)",
+        "description": "Drives a 2-channel opto-isolated relay module on PB10/PB11. Demonstrates active-low trigger logic: a LOW signal energizes the coil, a HIGH releases it.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
     }
 ]
