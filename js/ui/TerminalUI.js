@@ -50,6 +50,7 @@ export class TerminalUI {
         this.serialOutput = document.getElementById('serialOutput');
         this.resultsOutput = document.getElementById('resultsOutput');
         this.consolePanel = document.getElementById('consolePanel');
+        this.consoleCommandInput = document.getElementById('consoleCommandInput');
 
         this.currentTab = 'logs';
         // COMPILER_STATUS flips back to "not compiling" as soon as the /compile
@@ -106,18 +107,18 @@ export class TerminalUI {
         if (this.resultsOutput) this.resultsOutput.classList.toggle('hidden', tab !== 'results');
         if (this.consolePanel) this.consolePanel.classList.toggle('hidden', tab !== 'console');
 
-        // ConsoleUI.js owns focusing the terminal itself (and lazily
-        // connecting its pty session the FIRST time this fires) -- it
-        // isn't a plain <input> anymore (see #consolePanel's own comment),
-        // so this class has nothing left to reach into directly. Still
-        // gated on "expanded", same reasoning as the old direct .focus()
-        // call this replaced: focusing/connecting a pane that's collapsed
-        // (overflow:hidden, no scrollable ancestor) misplaced
-        // #terminalHeader via the browser's default scroll-into-view --
-        // confirmed by reproducing it with/without this guard.
+        // Land the cursor right on the prompt when switching in, like a
+        // real terminal grabbing focus -- but only while the pane is
+        // actually expanded. Two reasons: focusing an invisible input is
+        // pointless, and calling .focus() on an element clipped inside the
+        // collapsed pane's overflow:hidden (no scrollable ancestor to
+        // satisfy it) made the browser's default scroll-into-view behavior
+        // misplace #terminalHeader instead -- confirmed by reproducing it
+        // with/without this call. preventScroll as a second, defensive
+        // layer in case some other path ever focuses this while collapsed.
         const isCollapsed = this.terminalPane && this.terminalPane.classList.contains('h-8');
-        if (tab === 'console' && !isCollapsed) {
-            globalEventBus.emit('CONSOLE_TAB_SHOWN');
+        if (tab === 'console' && this.consoleCommandInput && !isCollapsed) {
+            this.consoleCommandInput.focus({ preventScroll: true });
         }
     }
 

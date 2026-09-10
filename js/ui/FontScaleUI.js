@@ -36,13 +36,11 @@ export class FontScaleUI {
     render() {
         applyFontScale(this.scale);
         if (this.valueEl) this.valueEl.textContent = `${this.scale}%`;
-        // xterm.js measures its own character-cell size in real pixels and
-        // caches cols/rows from it -- a CSS zoom change resizes it
-        // visually but fires no resize event on its own, so without this
-        // ConsoleUI.js's terminal would keep wrapping/rendering as if
-        // still at the OLD zoom level. Monaco doesn't need the same nudge
-        // here: it's explicitly exempted from zoom entirely (see
-        // fontScale.js), so its size never changes because of this control.
+        // Broadcast for anything that caches a pixel size derived from the
+        // zoom level and needs a nudge to recompute (a CSS zoom change
+        // fires no resize event of its own). Monaco is deliberately
+        // exempted from zoom entirely (see fontScale.js), so it doesn't
+        // listen for this.
         globalEventBus.emit('FONT_SCALE_CHANGED');
     }
 }

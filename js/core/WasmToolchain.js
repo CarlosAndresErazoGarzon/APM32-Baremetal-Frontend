@@ -8,8 +8,8 @@
  * ships the ARM Cortex-M backend, only the WebAssembly one; see the
  * investigation this whole feature was born from). Playground used to be
  * a second consumer (a fixed compile-then-run RUN button) -- removed once
- * its manual terminal tab (server-only, first a one-shot HTTP exec, now a
- * live pty session -- see ConsoleUI.js/backend/ptySession.js) became the
+ * its manual terminal tab (server-only, a one-shot HTTP exec per command
+ * -- see ConsoleUI.js/backend/learnRunner.js's execCommand()) became the
  * only way students actually used that mode.
  *
  * Second iteration of this file. The first used Wasmer's clang.wasm

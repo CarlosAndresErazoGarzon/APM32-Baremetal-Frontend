@@ -90,17 +90,11 @@ function focusEditor() {
 }
 
 // Whichever of these actually has something to type into right now --
-// the live terminal's own hidden input (Playground's Terminal tab -- see
-// ConsoleUI.js; xterm.js listens on this textarea for every keystroke, so
-// focusing it IS focusing the terminal, there's no separate command-input
-// element anymore) or serialInput (Serial Monitor tab, IDE mode) --
-// offsetParent also rules out a tab that's merely present in the DOM but
-// not the one currently showing.
+// consoleCommandInput (Playground's Terminal tab) or serialInput (Serial
+// Monitor tab, IDE mode) -- offsetParent also rules out a tab that's
+// merely present in the DOM but not the one currently showing.
 function focusableTerminalInput() {
-    const candidates = [
-        document.querySelector('#consoleXtermMount .xterm-helper-textarea'),
-        document.getElementById('serialInput'),
-    ];
+    const candidates = [document.getElementById('consoleCommandInput'), document.getElementById('serialInput')];
     return candidates.find(el => el && el.offsetParent !== null) || null;
 }
 
@@ -241,25 +235,6 @@ export function initHotkeys() {
         if (e.target === toggleBtn || (listPanel && listPanel.contains(e.target))) return;
         closeList();
     });
-
-    // CAPTURE phase, separate from the main bubble-phase listener below --
-    // xterm.js's own textarea handler treats Escape as a real byte to send
-    // to the shell (a genuine VT100 control code, not just a browser
-    // shortcut) and calls stopPropagation() on it, so a bubble-phase
-    // listener on window never sees the keydown at all while the terminal
-    // has focus. Capturing it on the way DOWN, before xterm's own handler
-    // ever runs, is the only way this exit-the-terminal shortcut can still
-    // fire. Scoped tightly to exactly that one case (Escape + terminal
-    // input focused) so it can't interfere with anything else xterm does
-    // with its own keystrokes.
-    window.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape' || e.repeat) return;
-        const active = document.activeElement;
-        const termInput = focusableTerminalInput();
-        if (active && termInput && active === termInput) {
-            active.blur();
-        }
-    }, true);
 
     window.addEventListener('keydown', (e) => {
         if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;

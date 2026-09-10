@@ -10,6 +10,7 @@ import { DapBloc } from './js/blocs/DapBloc.js';
 import { ModeBloc } from './js/blocs/ModeBloc.js';
 import { LearnBloc } from './js/blocs/LearnBloc.js';
 import { ThemeBloc } from './js/blocs/ThemeBloc.js';
+import { PlaygroundBloc } from './js/blocs/PlaygroundBloc.js';
 
 // UIs
 import { AuthUI } from './js/ui/AuthUI.js';
@@ -35,7 +36,7 @@ import { initHotkeys } from './js/ui/HotkeysUI.js';
 
 // Playground's seed is plain host C, no APM32 headers -- this is a freeform
 // space, not an ARM firmware project (see FileSystemBloc.js's constructor
-// params and ConsoleUI.js/backend/ptySession.js's live terminal).
+// params and PlaygroundBloc.js's exec() runner).
 const PLAYGROUND_SEED = {
     'main.c': '#include <stdio.h>\n\nint main(void) {\n    printf("Hello, APM32!\\n");\n    return 0;\n}\n'
 };
@@ -54,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const dapBloc = new DapBloc();
     const modeBloc = new ModeBloc();
     const learnBloc = new LearnBloc();
+    const playgroundBloc = new PlaygroundBloc();
 
     // 2. Instantiate UIs and Inject Dependencies
     const authUI = new AuthUI(authBloc);
@@ -90,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const theoryUI = new TheoryUI(learnBloc);
     const testResultsUI = new TestResultsUI();
     const runUI = new RunUI(learnBloc, CONFIG.API_URL, () => editorUI.getContent());
-    const consoleUI = new ConsoleUI(playgroundFsBloc, CONFIG.API_URL);
+    const consoleUI = new ConsoleUI(playgroundBloc, playgroundFsBloc, CONFIG.API_URL);
     const themeEditorUI = new ThemeEditorUI(themeBloc, authBloc);
     const fontScaleUI = new FontScaleUI();
 

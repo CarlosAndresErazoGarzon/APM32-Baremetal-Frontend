@@ -10,14 +10,6 @@
     <script src="vendor/dapjs/dap.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Playground's Console tab: a real terminal now (node-pty + a
-         WebSocket, see backend/ptySession.js), not a plain scrolling
-         transcript div -- xterm.js is the actual terminal emulator
-         (ANSI/cursor/backspace handling), same pairing VS Code's own
-         integrated terminal uses. See ConsoleUI.js. -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
     <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
@@ -544,11 +536,10 @@
         body.light-theme #consolePanel {
             background-color: var(--log-bg) !important;
         }
-        /* xterm.js's own colors (background/foreground/cursor/ANSI palette)
-           come from its `theme` option instead, rebuilt from these same
-           CSS vars on every theme change -- see ConsoleUI.js's
-           refreshXtermTheme(), the same pattern EditorUI.js already uses
-           for Monaco. Plain CSS can't reach into its canvas rendering. */
+        body.light-theme #consoleCommandInput,
+        body.light-theme #consoleStdinInput {
+            color: var(--text-main) !important;
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden">
@@ -987,17 +978,31 @@
             <!-- Test Results panel -->
             <div id="resultsOutput" class="hidden p-3 flex-grow overflow-y-auto space-y-3 custom-scrollbar"></div>
 
-            <!-- Terminal (Playground) panel -- a REAL interactive terminal
-                 (xterm.js, fed by a live pty over a WebSocket -- see
-                 ConsoleUI.js/backend/ptySession.js), not a request/response
-                 transcript. Typing while a program is running sends
-                 keystrokes straight to it, same as any real terminal --
-                 there's no separate stdin box anymore. p-2 padding here
-                 (not on the xterm mount itself) because xterm.js sizes its
-                 own canvas to fill its container exactly; padding on the
-                 mount would just get rendered over. -->
-            <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow p-2" style="background: var(--log-bg);">
-                <div id="consoleXtermMount" class="flex-grow min-h-0"></div>
+            <!-- Terminal (Playground) panel -- a command transcript, not a
+                 live terminal. Each submitted line is one HTTP round-trip
+                 to a fresh, disposable sandbox (see ConsoleUI.js /
+                 backend/learnRunner.js's execCommand()); there's no
+                 persistent process, so input for a running program has to
+                 be pre-supplied via the Stdin box below. -->
+            <div id="consolePanel" class="hidden flex flex-col min-h-0 flex-grow">
+                <div id="consoleOutput" class="flex-grow min-h-0 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed bg-[var(--log-bg)] custom-scrollbar"></div>
+                <!-- Optional stdin for the NEXT command -- each run is a
+                     fresh, non-interactive sandbox process (see
+                     ConsoleUI.js), so there's no way to type more input
+                     WHILE a program like scanf()/getchar() is already
+                     running and waiting. This is the workaround: whatever
+                     is here gets fed to the program's stdin from the
+                     start, one line per read. Collapsed by default --
+                     most commands (gcc, ls, ./prog with no input) don't
+                     need it. -->
+                <div class="border-t border-[var(--border-color)] bg-[var(--log-bg)] flex-shrink-0">
+                    <button id="consoleStdinToggle" class="w-full text-left px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-[var(--sidebar-text)] opacity-60 hover:opacity-100 transition-opacity" title="Texto que se envía como entrada estándar (stdin) al programa que corras a continuación">[+] Stdin</button>
+                    <textarea id="consoleStdinInput" rows="2" placeholder="Entrada para scanf/getchar/gets del próximo programa que corras -- una línea por lectura" spellcheck="false" class="hidden w-full resize-y bg-transparent font-mono text-[11px] text-[var(--text-main)] px-3 pb-2 focus:outline-none placeholder:opacity-40"></textarea>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-2 flex-shrink-0 border-t border-[var(--border-color)] bg-[var(--log-bg)]">
+                    <span class="font-mono text-[11px] font-bold text-[var(--accent-text)] select-none">$</span>
+                    <input id="consoleCommandInput" type="text" placeholder="gcc main.c -o prog && ./prog" spellcheck="false" autocomplete="off" class="flex-grow bg-transparent font-mono text-[11px] text-[var(--text-main)] focus:outline-none placeholder:opacity-40">
+                </div>
             </div>
         </div>
 
