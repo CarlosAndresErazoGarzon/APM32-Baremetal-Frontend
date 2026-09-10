@@ -6,12 +6,6 @@ import { globalEventBus } from '../core/EventBus.js';
 // the server if something's genuinely broken, short enough that it doesn't
 // feel like a dead terminal.
 const RECONNECT_DELAY_MS = 1000;
-// Debounce for pushing Monaco edits into an already-running session's
-// jobDir (see 'sync' in initEventListeners()) -- EDITOR_CONTENT_CHANGED
-// fires on every keystroke (EditorUI.js is deliberately un-debounced at
-// the bloc level), so this class debounces on its own end instead of
-// sending one WS message per character typed.
-const FILE_SYNC_DEBOUNCE_MS = 500;
 
 /**
  * ConsoleUI
@@ -30,12 +24,25 @@ const FILE_SYNC_DEBOUNCE_MS = 500;
  * `exit`, or the backend's own idle/max-session timeout) so the tab never
  * just goes dead.
  *
- * File sync: the live session polls its own sandbox dir and pushes changed
- * files back over the SAME WebSocket (see the 'files' message below) --
- * this class just merges whatever it's handed into the file manager,
- * exactly like the old exec()-per-command flow did at the end of each
- * command, just on a running timer instead of a request boundary now that
- * there IS no per-command boundary anymore.
+ * File sync -- deliberately NOT a background timer in either direction
+ * anymore (see this session's own history: a 2s jobDir poll + a 500ms
+ * editor-change debounce independently caused three separate real bugs --
+ * the editor's cursor jumping mid-typing, a deleted file resurrecting
+ * itself, and a command racing a just-finished edit -- because a clock
+ * ticking on its own schedule has no idea whether "now" is actually a safe
+ * moment to compare snapshots). Both directions are tied to an explicit,
+ * observable trigger instead:
+ *   - client -> jobDir: this class just tracks a `dirty` flag (any editor
+ *     change sets it, see the EDITOR_CONTENT_CHANGED listener) and flushes
+ *     it synchronously the instant Enter is forwarded to the pty (see
+ *     term.onData below) -- i.e. exactly, and only, right before a command
+ *     could possibly run. There's no window to race at all: not a smaller
+ *     one, none.
+ *   - jobDir -> client: the SERVER debounces on its own pty's OUTPUT
+ *     instead of a fixed clock (see ptySession.js) -- it polls jobDir once
+ *     shortly after the shell goes quiet again, which is naturally close
+ *     to "a command just finished", and never polls at all while the
+ *     student is just sitting in the editor with the terminal idle.
  */
 export class ConsoleUI {
     constructor(playgroundFsBloc, apiUrl) {
@@ -66,7 +73,11 @@ export class ConsoleUI {
         // 'sync'), not a fresh re-read of live bloc state -- see the
         // 'files' handler's own comment for the real bug this fixes.
         this.lastSyncedFiles = {};
-        this.syncTimer = null;
+        // Set by any editor change (see EDITOR_CONTENT_CHANGED below),
+        // cleared by flushSync() -- replaces the old debounce timer.
+        // "Is there an edit the server hasn't seen yet" is a plain fact
+        // about the world, not something that needs its own clock.
+        this.dirty = false;
 
         this.initTerminal();
         this.initEventListeners();
@@ -116,22 +127,22 @@ export class ConsoleUI {
         // pty as raw bytes; bash's own readline on the other end is what
         // makes backspace/history/Ctrl+C work, not anything client-side.
         //
-        // Enter (\r) flushes any pending sync FIRST, real reported bug:
+        // Enter (\r) flushes any pending edit FIRST, real reported bug:
         // compiling/running a command in the SAME breath as finishing an
         // edit (a totally normal workflow -- type, hit Enter to compile)
-        // raced the 500ms debounce below. Within that window the server's
+        // raced the old 500ms debounce. Within that window the server's
         // jobDir still had the file's PREVIOUS content, so the command ran
         // against stale code -- missing the student's last few lines, or
         // "No such file" entirely for a file just created. Flushing
         // synchronously before forwarding Enter means the 'sync' WS
         // message is always enqueued (and processed server-side) before
         // the keystroke that actually triggers the command -- WebSocket
-        // preserves per-connection message order, so this isn't just a
-        // shorter race window, it's not a race at all anymore.
+        // preserves per-connection message order, so this isn't a smaller
+        // race window, it's not a race at all: the sync isn't scheduled
+        // for "soon", it just always already happened by the time Enter
+        // lands.
         //
-        // Gated on this.syncTimer actually being armed -- an earlier
-        // version flushed on every single Enter unconditionally, which
-        // sounds harmless but isn't: flushSync() unconditionally
+        // Gated on this.dirty -- flushSync() unconditionally
         // fs.writeFileSync()s every project file server-side
         // (writeFilesIntoDir has no unchanged-file skip), and the WS
         // handler/syncFiles() are fully synchronous, blocking Node's ONE
@@ -139,12 +150,12 @@ export class ConsoleUI {
         // just reads a few lines of input (a menu loop, several scanf()
         // prompts) would otherwise re-trigger that full disk write on
         // EVERY Enter, with nothing having actually changed since the
-        // last sync -- exactly the per-keystroke server cost the 500ms
-        // debounce exists to prevent in the first place. Only flushing
-        // when a debounce is actually pending keeps the fix scoped to the
-        // real race (Enter arriving before a genuinely unsynced edit).
+        // last sync -- exactly the per-keystroke server cost this flag
+        // exists to avoid. Only flushing when there's a genuinely unsynced
+        // edit keeps this scoped to the real race (Enter arriving before
+        // an edit the server hasn't seen yet).
         this.term.onData(data => {
-            if ((data.includes('\r') || data.includes('\n')) && this.syncTimer) this.flushSync();
+            if ((data.includes('\r') || data.includes('\n')) && this.dirty) this.flushSync();
             this.sendWs({ type: 'input', data });
         });
         this.term.onResize(({ cols, rows }) => this.sendWs({ type: 'resize', cols, rows }));
@@ -163,20 +174,22 @@ export class ConsoleUI {
             if (this.term) this.term.focus();
         });
 
-        // Keeps an already-running session's jobDir current with Monaco's
-        // latest content -- without this, editing main.c AFTER the
-        // terminal already connected would silently keep compiling
+        // Marks the jobDir as stale -- without this, editing main.c AFTER
+        // the terminal already connected would silently keep compiling
         // whatever the file looked like at connect time (the session's
-        // jobDir is only ever seeded once). Fires for every mode's editor,
-        // not just Playground's, but reads this.playgroundFsBloc
-        // regardless -- a no-op sync (same content as last time) when the
-        // change came from IDE/Learn's own unrelated editor. Gated on
-        // connectStarted so it's silent until the student has actually
-        // opened the terminal at least once.
+        // jobDir is only ever seeded once). Just a flag, no timer: the
+        // actual sync happens synchronously right before the next Enter
+        // (see term.onData above) -- there's no "soon" to schedule here,
+        // only "not yet". Fires for every mode's editor, not just
+        // Playground's, and for every kind of change FileSystemBloc makes
+        // (create/delete/rename/edit all emit this), but reads
+        // this.playgroundFsBloc regardless -- a no-op flush (same content
+        // as last time) when the change came from IDE/Learn's own
+        // unrelated editor. Gated on connectStarted so it's silent until
+        // the student has actually opened the terminal at least once.
         globalEventBus.on('EDITOR_CONTENT_CHANGED', () => {
             if (!this.connectStarted) return;
-            clearTimeout(this.syncTimer);
-            this.syncTimer = setTimeout(() => this.flushSync(), FILE_SYNC_DEBOUNCE_MS);
+            this.dirty = true;
         });
 
         // Monaco isn't the only thing that can't read CSS custom properties
@@ -191,22 +204,12 @@ export class ConsoleUI {
         globalEventBus.on('FONT_SCALE_CHANGED', () => this.safeFit());
     }
 
-    // Sends the CURRENT editor state to the server right now, canceling
-    // any still-pending debounced sync (there's nothing left to wait for
-    // once this fires). Called both by the debounce timer itself and, more
-    // importantly, by term.onData's Enter-key interception above -- see
-    // that comment for the race this closes.
+    // Sends the CURRENT editor state to the server right now. Called by
+    // term.onData's Enter-key interception above, and ONLY from there --
+    // see that comment for the race this closes.
     flushSync() {
         if (!this.connectStarted) return;
-        clearTimeout(this.syncTimer);
-        // Not just clearTimeout -- this.syncTimer doubles as "is there
-        // actually a pending edit to send" for term.onData's Enter check
-        // above. clearTimeout() alone leaves it holding a stale (already-
-        // fired-or-cancelled) timer id, which is truthy forever after the
-        // FIRST edit ever made -- nulling it out here is what lets that
-        // check tell "nothing changed since the last sync" apart from
-        // "an edit is still waiting to go out".
-        this.syncTimer = null;
+        this.dirty = false;
         const files = { ...this.playgroundFsBloc.state.virtualFS };
         this.lastSyncedFiles = files;
         this.sendWs({ type: 'sync', files });
@@ -235,6 +238,11 @@ export class ConsoleUI {
             }
             const files = { ...this.playgroundFsBloc.state.virtualFS };
             this.lastSyncedFiles = files;
+            // Whatever was dirty before is already included in this
+            // fresh read -- 'start' always carries the CURRENT bloc
+            // state, not a stale snapshot, so there's nothing left
+            // pending once this message goes out.
+            this.dirty = false;
             // cols/rows here, not left for a later 'resize' message: a
             // real reported bug -- the pty always spawned at a hardcoded
             // 80x24 (see ptySession.js) and only got resized if term's
