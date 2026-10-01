@@ -363,6 +363,33 @@ export class SidebarUI {
         };
         dropdown.appendChild(renameOpt);
 
+        // Single-file download -- same object-URL + throwaway <a> pattern
+        // CompilerBloc.js already uses for the firmware .bin/.zip, just
+        // fed from this file's own virtualFS content instead of a
+        // compile result. Reads live state at click time (not `filename`'s
+        // content captured when the row was built) so it can't ever hand
+        // back stale content if the file was edited since the tree last
+        // re-rendered.
+        const downloadOpt = document.createElement('button');
+        downloadOpt.className = "w-full text-left px-4 py-2 text-[10px] text-[var(--sidebar-text)] hover:bg-[var(--active-bg)] hover:text-[var(--active-text)] flex items-center uppercase tracking-tight font-bold";
+        downloadOpt.innerText = 'Download';
+        downloadOpt.onclick = (e) => {
+            e.stopPropagation();
+            dropdown.classList.add('hidden');
+            const content = this.fsBloc.state.virtualFS[filename];
+            if (content === undefined) return; // deleted/renamed out from under this stale row
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = displayName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+        dropdown.appendChild(downloadOpt);
+
         const deleteOpt = document.createElement('button');
         deleteOpt.className = "w-full text-left px-4 py-2 text-[10px] text-red-500 hover:bg-red-500/10 hover:text-red-600 flex items-center uppercase tracking-tight font-bold";
         deleteOpt.innerText = `Delete`;

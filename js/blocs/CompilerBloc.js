@@ -16,6 +16,17 @@ export class CompilerBloc extends Bloc {
         this.emit({ isCompiling: true, lastCompiledBin: null });
         globalEventBus.emit('LOG', { message: "Compiling in cloud...", type: 'warn' });
         globalEventBus.emit('COMPILER_STATUS', { status: 'compiling' });
+        // Real reported bug: fixing a syntax error and recompiling
+        // successfully left the PREVIOUS attempt's red squiggly markers
+        // sitting on the editor forever. Root cause: this only ever ADDED
+        // markers (in the catch block below, on failure) and never
+        // cleared them -- a clean compile had no code path that told
+        // EditorUI "there's nothing to show anymore". Clearing right here,
+        // the instant a NEW attempt starts, matches the pattern
+        // LearnBloc.js's own grading flow already uses -- it also means a
+        // second failure at a different line doesn't show BOTH the old
+        // and new markers mixed together.
+        globalEventBus.emit('COMPILER_ERRORS', { markers: [] });
 
         try {
             const response = await fetch(`${apiUrl}/compile`, {
