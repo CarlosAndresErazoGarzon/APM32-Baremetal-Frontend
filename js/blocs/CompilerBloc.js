@@ -80,6 +80,60 @@ export class CompilerBloc extends Bloc {
         }
     }
 
+    // Fast path for FileSystemBloc.getUnmodifiedExampleId(): fetches the
+    // example's prebuilt firmware.bin (built ahead of time by
+    // scripts/build_prebuilt_examples.js from the exact same template +
+    // example files the backend would otherwise recompile from scratch)
+    // instead of a full /compile round trip. Mirrors compile()'s state
+    // transitions and events exactly, so every caller downstream (the
+    // FLASH button, DOWNLOAD button, memory usage panel, log) behaves the
+    // same either way -- they can't tell which path produced the bin.
+    async loadPrebuilt(exampleId) {
+        if (this.state.isCompiling) return null;
+
+        this.emit({ isCompiling: true, lastCompiledBin: null });
+        globalEventBus.emit('LOG', { message: `"${exampleId}" is unmodified -- using its prebuilt firmware, no compile needed.`, type: 'warn' });
+        globalEventBus.emit('COMPILER_STATUS', { status: 'compiling' });
+        globalEventBus.emit('COMPILER_ERRORS', { markers: [] });
+
+        try {
+            const binRes = await fetch(`examples/${exampleId}/prebuilt/firmware.bin`);
+            if (!binRes.ok) throw new Error('Prebuilt firmware not found');
+            const arrayBuffer = await binRes.arrayBuffer();
+
+            this.emit({ isCompiling: false, lastCompiledBin: arrayBuffer });
+
+            let flashUsed = arrayBuffer.byteLength;
+            let ramUsed = 0;
+            try {
+                const sizeRes = await fetch(`examples/${exampleId}/prebuilt/size.json`);
+                if (sizeRes.ok) {
+                    const { text, data, bss } = await sizeRes.json();
+                    flashUsed = text + data;
+                    ramUsed = data + bss;
+                }
+            } catch { /* size.json is informational only -- missing is fine */ }
+
+            globalEventBus.emit('LOG', {
+                message: `Using prebuilt firmware. Size: ${arrayBuffer.byteLength} bytes.`,
+                type: 'success'
+            });
+            globalEventBus.emit('LOG', {
+                message: `Memory: Flash: ${flashUsed} B | RAM: ${ramUsed} B`,
+                type: 'info'
+            });
+            globalEventBus.emit('COMPILER_STATUS', { status: 'success' });
+            globalEventBus.emit('MEMORY_USAGE', { flashUsed, ramUsed });
+
+            return arrayBuffer;
+        } catch (error) {
+            this.emit({ isCompiling: false });
+            globalEventBus.emit('LOG', { message: `Prebuilt load error: ${error.message}`, type: 'error' });
+            globalEventBus.emit('COMPILER_STATUS', { status: 'error' });
+            return null;
+        }
+    }
+
     async downloadZip(virtualFS) {
         // eslint-disable-next-line no-undef
         const zip = new JSZip();

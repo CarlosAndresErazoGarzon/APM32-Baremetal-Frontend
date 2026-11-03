@@ -627,9 +627,44 @@ export class FileSystemBloc extends Bloc {
                 projectId: example.id
             });
             globalEventBus.emit('LOG', { message: `Workspace loaded: ${example.name}`, type: 'success' });
-            
+
         } catch (err) {
             globalEventBus.emit('LOG', { message: `Error loading workspace: ${err.message}`, type: 'error' });
+        }
+    }
+
+    // Returns the loaded example's id if the workspace still matches it
+    // byte-for-byte, null otherwise (different project type/no example
+    // loaded, a file was added/removed, or any file's content changed).
+    // CompilerBloc.loadPrebuilt() uses this to skip a full cloud recompile
+    // for "flash the example as-is" -- the single most common case, and
+    // previously a full `make all` from scratch on every single click, even
+    // when nothing had changed since the example was loaded.
+    async getUnmodifiedExampleId() {
+        const { projectType, projectId, virtualFS } = this.state;
+        if (projectType !== 'example' || !projectId) return null;
+
+        try {
+            const indexRes = await fetch('examples/index.json');
+            if (!indexRes.ok) return null;
+            const examplesList = await indexRes.json();
+            const example = examplesList.find(e => e.id === projectId);
+            if (!example) return null;
+
+            const currentFiles = Object.keys(virtualFS);
+            if (currentFiles.length !== example.files.length) return null;
+            if (!example.files.every(f => currentFiles.includes(f))) return null;
+
+            for (const file of example.files) {
+                const res = await fetch(`examples/${projectId}/${file}`);
+                if (!res.ok) return null;
+                const original = await res.text();
+                if (original !== virtualFS[file]) return null;
+            }
+
+            return projectId;
+        } catch {
+            return null;
         }
     }
 }
