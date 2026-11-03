@@ -1,5 +1,6 @@
 #include "apm32f10x.h"
 #include "apm32_config.h"
+#include "delay.h"
 
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
@@ -16,7 +17,6 @@ int main(void) {
         GPIOB->ODATA ^= (1 << 2); // Toggle LED PB2
         delay_ms(500);
 
-        /* USER CODE BEGIN While */
         /* USER CODE END While */
     }
     

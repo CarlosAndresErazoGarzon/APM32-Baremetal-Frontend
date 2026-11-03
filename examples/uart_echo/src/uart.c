@@ -3,18 +3,18 @@
 extern uint32_t SystemCoreClock;
 
 void UART_Init(uint32_t baudrate) {
-    // Activar Relojes RCM
+    // Enable RCM clocks
     RCM->APB2CLKEN |= (1 << 2) | (1 << 14);
 
-    // Configurar Pines (PA9 = AF-PP, PA10 = Input)
-    GPIOA->CFGHIG &= ~(0xFF << 4); 
-    GPIOA->CFGHIG |= (0x0B << 4);  
-    GPIOA->CFGHIG |= (0x04 << 8);  
+    // Configure pins (PA9 = AF-PP, PA10 = Input)
+    GPIOA->CFGHIG &= ~(0xFF << 4);
+    GPIOA->CFGHIG |= (0x0B << 4);
+    GPIOA->CFGHIG |= (0x04 << 8);
 
-    // Configurar Baudrate dinámico 
+    // Configure baudrate dynamically
     USART1->BR = SystemCoreClock / baudrate;
 
-    // Habilitar USART1 (UE, TE, RE)
+    // Enable USART1 (UE, TE, RE)
     USART1->CTRL1 = (1 << 13) | (1 << 3) | (1 << 2);
 }
 
@@ -28,7 +28,7 @@ void UART_SendString(const char *msg) {
 }
 
 uint8_t UART_Available(void) {
-    // RXBNE (bit 5): 1 si hay un dato nuevo
+    // RXBNE (bit 5): 1 if there's new data
     return (USART1->STS & (1 << 5)) ? 1 : 0;
 }
 
