@@ -99,6 +99,27 @@ export class EditorUI {
             padding: { top: 10, bottom: 10 }
         });
 
+        // Real reported bug: on a slow/filtered connection, Monaco often
+        // finishes initializing (and measures its own character-width
+        // cache) BEFORE the real Inconsolata web font has actually loaded
+        // -- it renders with the fallback (Menlo/Courier New) first. When
+        // Inconsolata swaps in moments later, its glyphs are a different
+        // width than what Monaco cached, but nothing tells Monaco to
+        // re-measure -- so its cursor/selection overlay (positioned from
+        // that stale cache) drifts a little further from the real glyphs
+        // with every single character typed on a line, compounding as you
+        // type instead of just being off by a constant amount.
+        // document.fonts.ready resolves once every @font-face the page
+        // actually uses has settled (loaded or failed) -- remeasureFonts()
+        // is Monaco's own documented fix for exactly this: it recomputes
+        // every open editor's cached glyph metrics from whatever font is
+        // really rendering right now.
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(() => {
+                if (monaco.editor.remeasureFonts) monaco.editor.remeasureFonts();
+            }).catch(() => { /* font loading failed outright -- nothing more to remeasure */ });
+        }
+
         this.editor.onDidChangeModelContent(() => {
             // Push every keystroke into the active mode's bloc immediately --
             // no debounce. This is what makes each mode's getContent() always
