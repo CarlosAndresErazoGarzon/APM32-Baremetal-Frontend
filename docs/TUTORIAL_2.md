@@ -18,14 +18,50 @@ This setup is a **Multiplexed Common Anode** system.
 
 ---
 
-## 1. Find YOUR Board's Segment Wiring First
+## 1. Is Your Display Common Anode or Common Cathode?
+
+Every multi-segment display has one or more "common" pins shared by every segment. Before you wire anything, you need to know whether that common pin is the shared **anode** (current flows IN) or the shared **cathode** (current flows OUT) -- it decides your GPIO logic (active-high vs active-low) AND, if you're switching it through a transistor (needed whenever one MCU pin can't safely drive a whole digit, or to multiplex 2+ digits), which transistor type you need.
+
+### Test it with a multimeter -- don't guess from the part number
+
+1. Multimeter in **diode-test mode** (the diode symbol, not continuity/Ω).
+2. Probe **RED** on a common pin, **BLACK** on any one segment pin.
+   - Beeps / shows ~1.8-2.2V -> that segment lit -> the common is the **anode** (current flowed IN through it).
+   - Nothing (OL) -> swap the probes. If it beeps now -> the common is the **cathode**.
+3. If your display has two commons (one per digit), repeat on the second one to confirm both agree.
 
 > [!WARNING]
-> **Which physical pin drives which segment (A-G) is NOT guaranteed to be the same on every display unit** -- it depends on the internal PCB routing of the specific module you were handed, which varies between suppliers/batches even for visually identical parts. A real reported bug: a previous version of this page assumed a fixed, scrambled bit order that turned out to be wrong for the boards actually in the lab, and produced garbled digits with code that was otherwise 100% correct. **Don't copy the table in Section 2 blindly -- verify your own wiring first**, with either method below.
+> **Don't assume from the part number or from another board that "looked the same".** A real reported case: a student's display was labeled almost like the LDS-5261DS from the note above (same body, same pinout, different suffix letter) but measured out as common **anode**, the opposite of that note. Measure your own unit.
+
+### Picking the right transistor
+
+| Display type | The common pin needs... | Transistor | Wiring |
+|---|---|---|---|
+| **Common Anode** | current sourced IN (pulled toward VCC) | **PNP** (e.g. 2N3906) | Emitter -> VCC, Base -> 1kΩ -> GPIO pin, Collector -> display common pin. Digit ON = GPIO pin **LOW** (turns the PNP on). |
+| **Common Cathode** | current sunk OUT (pulled toward GND) | **NPN** (e.g. 2N2222) | Emitter -> GND, Base -> 1kΩ -> GPIO pin, Collector -> display common pin. Digit ON = GPIO pin **HIGH** (turns the NPN on). |
+
+> [!WARNING]
+> **Getting this backwards doesn't just fail silently -- it can look like a different, more confusing bug.** Reported symptom: with the wrong transistor type (or the right type installed with its legs swapped), only the ONE digit that happens to have some other accidental path to ground/VCC ever lights, while the other stays dark -- which looks like "digits are on the wrong side" instead of "this is wired backwards", and can send you chasing a segment-mapping or code bug that doesn't exist. If a digit never lights, or both digits show a plausible-but-wrong pattern, re-check this table before touching code.
+
+> [!TIP]
+> **Verify the transistor's own E/B/C pinout too**, not just its type -- not every PNP/NPN part shares the same pin order, and "I swapped the transistor type and it still doesn't work" is very often this. In diode-test mode: for an **NPN**, put RED on one leg and BLACK on each of the other two in turn -- the leg where BOTH give a diode-drop reading is the **Base**. For a **PNP**, it's the same test with the probes swapped: the leg where BOTH give a diode-drop reading with **BLACK** on it is the Base. If your multimeter has an hFE/transistor-tester socket, that's even easier -- only the correct orientation gives a sane gain reading.
+
+### This also flips your segment logic
+
+The common's polarity decides how you write `nums[]`:
+- **Common Cathode**: segment ON = GPIO pin **HIGH**. Write the pattern bits directly.
+- **Common Anode**: segment ON = GPIO pin **LOW**. Invert every bit when writing it -- or just negate the whole byte (`~patron`) if your segment pins are contiguous like `PA0`-`PA7`, as covered below.
+
+---
+
+## 2. Find YOUR Board's Segment Wiring First
+
+> [!WARNING]
+> **Which physical pin drives which segment (A-G) is NOT guaranteed to be the same on every display unit** -- it depends on the internal PCB routing of the specific module you were handed, which varies between suppliers/batches even for visually identical parts. A real reported bug: a previous version of this page assumed a fixed, scrambled bit order that turned out to be wrong for the boards actually in the lab, and produced garbled digits with code that was otherwise 100% correct. **Don't copy the table in Section 3 blindly -- verify your own wiring first**, with either method below.
 
 ### Method A: One segment at a time (recommended -- uses only what you already have)
 
-Configure `PA0`-`PA7` as outputs (Section 3 below shows how), then in `while(1)` drive **exactly one bit HIGH at a time**, with a long delay so you can actually see it:
+Configure `PA0`-`PA7` as outputs (Section 4 below shows how), then in `while(1)` drive **exactly one bit HIGH at a time**, with a long delay so you can actually see it:
 
 ```c
 for (uint8_t bit = 0; bit < 8; bit++) {
@@ -43,7 +79,7 @@ With the board unpowered, set your multimeter to **diode/continuity mode** and p
 
 ---
 
-## 2. The Display Alphabet
+## 3. The Display Alphabet
 
 Once you know YOUR board's mapping, build the lookup table around it. This tutorial's own board measured out to the simplest possible case -- **segment A on `PA0`, B on `PA1`, C on `PA2`, D on `PA3`, E on `PA4`, F on `PA5`, G on `PA6`** (bit `N` of the byte you send to `GPIOA->ODATA` is segment `N`, in alphabetical order) -- so that's the example used here. If Method A/B above gave you a different order, re-derive each value the same way: set the bit for every segment that should be ON, leave the rest 0, matching YOUR bit-to-segment assignment instead of this one.
 
@@ -75,7 +111,7 @@ const uint8_t nums[10] = {
 
 ---
 
-## 3. Super Fast Configuration
+## 4. Super Fast Configuration
 
 Since we are strictly using the 8 lowest pins of Port A, we can configure all of them at once with a single instruction (rather than bit-by-bit masking). Then, we will configure `PB8` and `PB9` individually.
 
@@ -151,7 +187,7 @@ GPIOB->ODATA |= (1 << 8) | (1 << 9);
 
 ---
 
-## 4. Main Loop: Persistence of Vision
+## 5. Main Loop: Persistence of Vision
 
 To display a number like "85", our MCU must perform:
 1. Turn OFF both transistors.

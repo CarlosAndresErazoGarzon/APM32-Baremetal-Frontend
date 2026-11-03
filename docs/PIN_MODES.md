@@ -17,7 +17,7 @@ Every pin involves **two separate concerns**, and mixing them up is the #1 sourc
 
 ## The `GPIOx` Struct: 4 Registers You'll Actually Use
 
-Every port (`GPIOA`, `GPIOB`, `GPIOC`...) is really one C struct -- `apm32f10x.h` defines it, and `GPIOx->CFGLOW`/`GPIOx->ODATA`/etc. is just normal struct member access, the same as any `struct` you'd write yourself. The real peripheral has a few more registers (`BSC`, `BC`, `LOCK`...), but this course only ever touches these 4:
+Every port (`GPIOA`, `GPIOB`, `GPIOC`...) is really one C struct -- `apm32f10x.h` defines it, and `GPIOx->CFGLOW`/`GPIOx->ODATA`/etc. is just normal struct member access, the same as any `struct` you'd write yourself. These 4 cover everything Tutorials 1-3 do; `BSC` and `BC` (atomic set/clear, no read involved) are covered separately in Part 3, and `LOCK` (freeze a pin's configuration until reset) isn't used in this course at all:
 
 | Register | Full name | What it does |
 | :-- | :-- | :-- |
@@ -239,6 +239,42 @@ if (!(GPIOA->IDATA & (1 << 0))) {
 ```
 
 Notice neither of these touches `CFGLOW`/`CFGHIG` at all -- that part is already done, sitting untouched from Part 1, for as long as the program runs.
+
+---
+
+## Part 3: Atomic Set/Clear -- `BSC` and `BC`
+
+Every `ODATA` write you've done so far (`|=`, `&=~`, `^=`) is secretly **three CPU steps**: read the whole 32-bit register, modify the one bit you care about, write the whole register back. Between that read and that write, nothing stops an interrupt from firing and changing a *different* bit on the same port -- when your main-line code's write finally happens, it's still holding the OLD value of that other bit from before the interrupt ran, and silently stomps the interrupt's change the instant it writes back. `BSC` and `BC` are write-only registers that set or clear pins directly in hardware, with **no read step at all** -- so there's nothing to race.
+
+### `BSC` -- Bit Set/Clear (one register, both directions)
+
+One 32-bit write, two halves:
+
+- **Bits 0-15** -- write a `1` to set that pin **HIGH**.
+- **Bits 16-31** -- write a `1` to set that pin **LOW** (pin *N* is cleared by bit *N+16*).
+
+Writing `0` to any bit does nothing to that pin either way -- which is the whole point: you never need to read the register first, there's no mask to preserve, and you can set some pins and clear others in the exact same instruction:
+
+```c
+GPIOB->BSC = (1 << 10);           // Set PB10 HIGH -- one atomic write
+GPIOB->BSC = (1 << (10 + 16));    // Set PB10 LOW -- one atomic write
+GPIOB->BSC = (1 << 12) | (1 << (10 + 16));  // PB12 HIGH *and* PB10 LOW, same instruction
+```
+
+Compare that last line to the read-modify-write equivalent -- `GPIOB->ODATA = (GPIOB->ODATA & ~(1<<10)) | (1<<12);` -- same end result, but that version reads `ODATA` first and is exactly the kind of write an interrupt could race.
+
+> [!NOTE]
+> **Header quirk, not a bug in your code.** If you look up `BSC`'s bitfield names in `apm32f10x.h`, the upper half is mostly `BC1, BC2, BC4...BC15` -- except bits 16 and 19, which are named `BR0` and `BR3` instead. This is a leftover from ST's original register (where the whole upper half is called `BR0`-`BR15`, for "Bit Reset") that APM32's vendor header renamed to `BC` almost everywhere but missed two spots. Functionally bit *N+16* always clears pin *N* regardless of which name is attached to it -- write the raw shifted value to `->BSC` like the examples above instead of relying on the inconsistently-named `->BSC_B.xxx` fields.
+
+### `BC` -- Bit Clear (its own dedicated register)
+
+A second, simpler register at a different address: bits 0-15 only, write a `1` to clear (drive LOW) that pin. No set half, no upper 16 bits, consistently named this time:
+
+```c
+GPIOB->BC = (1 << 10); // Set PB10 LOW -- atomic, equivalent to GPIOB->BSC's upper half
+```
+
+Functionally redundant with `BSC`'s clear half -- it exists as its own register for symmetry with `BSC`'s set half and for cases where you specifically want a clear-only instruction. Either one is safe to use; this course's existing examples still use plain `ODATA` read-modify-write, which is fine as long as nothing else ever touches that same port -- true for everything so far, including the EINT example (its ISR toggles `GPIOB` while the main loop's heartbeat toggles `GPIOA`, so they never collide). The moment your own project has an ISR and the main loop both touching pins on the *same* port, that's exactly when to reach for `BSC`/`BC` instead.
 
 ---
 

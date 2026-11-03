@@ -4,7 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>APM32 STATION</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vendored, compiled Tailwind build -- NOT the cdn.tailwindcss.com
+         Play CDN. That script has to fetch AND execute successfully
+         (scanning the whole DOM at runtime to generate styles on the fly)
+         before a single utility class works; on a slow or filtered
+         school network it silently never finishes, and every element
+         that depends on it -- icons above all, with no intrinsic size of
+         their own -- renders at the browser's bare default instead. A
+         real reported bug: students on exactly that kind of network saw
+         giant, unstyled icons and nothing else. Same fix already applied
+         to dapjs (see vendor/dapjs/README.md) for the same underlying
+         reason -- pin + vendor instead of trusting a CDN to keep working.
+         Rebuild after adding/removing Tailwind classes: `npm run build:css`
+         (see vendor/tailwind/README.md). -->
+    <link rel="stylesheet" href="vendor/tailwind/tailwind.css">
     <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;500;600;700;800;900&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
     <!-- Vendored, not CDN -- see vendor/dapjs/README.md for why. -->
     <script src="vendor/dapjs/dap.umd.js"></script>
@@ -892,7 +905,10 @@
                         <button data-doc="PIN_MODES.md" class="doc-tab ascii-tab">PIN MODES</button>
                         <button data-doc="TUTORIAL_1.md" class="doc-tab ascii-tab">TUTORIAL 1</button>
                         <button data-doc="TUTORIAL_2.md" class="doc-tab ascii-tab">TUTORIAL 2</button>
+                        <button data-doc="TALLER_2.md" class="doc-tab ascii-tab">FULL SETUP REFERENCE</button>
                         <button data-doc="TUTORIAL_3.md" class="doc-tab ascii-tab">TUTORIAL 3</button>
+                        <button data-doc="TUTORIAL_4.md" class="doc-tab ascii-tab">TUTORIAL 4</button>
+                        <button data-doc="TUTORIAL_5.md" class="doc-tab ascii-tab">TUTORIAL 5</button>
                     </div>
                     <div id="docContent" class="md-content">
                         <!-- md content -->
