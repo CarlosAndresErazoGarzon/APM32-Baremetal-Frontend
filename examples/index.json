@@ -1,6 +1,12 @@
 [
-    { 
-        "id": "default", 
+    {
+        "id": "truth_table_logic",
+        "name": "Combinational Logic (Tutorial 1)",
+        "description": "2 buttons (PB10/PB11) drive 4 LEDs (PB12-PB15) by a truth table: neither pressed is all OFF, either pressed lights its own pair, both pressed is all ON. No debounce on purpose -- this tutorial is about reading a level and applying combinational logic.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "default",
         "name": "Blink Simple", 
         "description": "Standard LED heartbeat on PB2. Uses SysTick for deterministic millisecond delays.",
         "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"] 
@@ -21,6 +27,48 @@
         "id": "relay",
         "name": "Relay Module (Tutorial 3)",
         "description": "Drives a 2-channel opto-isolated relay module on PB10/PB11. Demonstrates active-low trigger logic: a LOW signal energizes the coil, a HIGH releases it.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "non_blocking_blink",
+        "name": "Non-Blocking Blink (millis style)",
+        "description": "Blinks PB2 every 500ms WITHOUT delay_ms() -- checks msTicks each loop pass instead of blocking, so the rest of while(1) is always free to run.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "binary_manipulator",
+        "name": "Binary Manipulator (Taller 2)",
+        "description": "Integrates all 20 pins from Taller 2: 6 LEDs show a binary number, 2 multiplexed 7-segment displays show its decimal value, and 4 debounced buttons move a cursor, toggle a bit, and clear -- all non-blocking.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "eint_button",
+        "name": "External Interrupt (EINT) Button",
+        "description": "Reacts to a button press via a real hardware interrupt on EINT line 10 (PA10) instead of polling IDATA -- PB2 toggles instantly inside the ISR, while the main loop keeps blinking its own heartbeat on PA8, completely untouched.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "watchdog_demo",
+        "name": "Independent Watchdog (IWDT)",
+        "description": "Feeds the IWDT every loop pass (~2s timeout) while blinking PB2. Hold the button on PA10 to simulate a firmware hang: the watchdog resets the board on its own, and PA8 blinks 3 times on the next boot to prove RCM->CSTS caught the IWDT reset.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "fsm_toggle",
+        "name": "Table-Driven FSM (Toggle)",
+        "description": "Hardware port of the class example (11_mquinas/fsm_table.c): the same State/Event/Cell table and fsm_dispatch() pattern, but EV_BTN now comes from a debounced PA10 and the actions drive PB2 instead of printf.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "adc_potentiometer",
+        "name": "Potentiometer / ADC Reading (Tutorial 4)",
+        "description": "Reads a potentiometer's wiper voltage on PA2 (ADC1 Channel 2) as a 12-bit value and turns it into a 6-LED bar graph on the same PB12-PB15/PA8/PA9 LEDs used in Taller 2.",
+        "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
+    },
+    {
+        "id": "rtc_clock",
+        "name": "Real-Time Clock (Tutorial 5)",
+        "description": "Unlocks the backup domain, starts the Blue Pill's onboard 32.768kHz crystal, and ticks RTC->CNTL once per second -- no extra hardware. Displays the last two digits of the seconds counter on the same multiplexed 7-segment setup from Tutorial 2.",
         "files": ["src/main.c", "src/apm32_config.c", "src/delay.c", "inc/apm32_config.h", "inc/delay.h"]
     }
 ]
