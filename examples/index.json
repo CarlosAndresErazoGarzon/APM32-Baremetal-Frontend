@@ -42,6 +42,20 @@
         ]
     },
     {
+        "id": "uart_fsm",
+        "name": "UART Multi-FSM Dispatcher",
+        "description": "Three independent table-driven FSMs (LED/MOTOR/UART) sharing the same 2-state transition table, dispatched by whichever key ('l'/'m'/'u') arrives over serial -- plus the same non-blocking echo and 2s heartbeat as USB UART Echo.",
+        "files": [
+            "src/main.c",
+            "src/apm32_config.c",
+            "src/uart.c",
+            "src/delay.c",
+            "inc/apm32_config.h",
+            "inc/uart.h",
+            "inc/delay.h"
+        ]
+    },
+    {
         "id": "led_sequence",
         "name": "LED Progress Sequence",
         "description": "Progressive sequence using pins PB12-PB15. Demonstrates sequential I/O control and multi-pin configuration.",

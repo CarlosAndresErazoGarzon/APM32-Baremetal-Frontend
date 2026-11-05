@@ -8,11 +8,33 @@ export class SerialUI {
         this.baudRateSelect = document.getElementById('baudRate');
         this.serialOutput = document.getElementById('serialOutput');
         this.serialInput = document.getElementById('serialInput');
+        this.serialSendBtn = document.getElementById('serialSendBtn');
+        this.serialClearBtn = document.getElementById('serialClearBtn');
 
         this.initEventListeners();
         this.initEventBusSubscribers();
 
         this.serialBloc.subscribe(this.render.bind(this));
+    }
+
+    // Shared by the Enter-key handler and the SEND button -- previously only
+    // the keypress listener existed, so clicking SEND (instead of pressing
+    // Enter) silently did nothing.
+    sendCurrentInput() {
+        if (!this.serialInput) return;
+        const val = this.serialInput.value;
+        if (val.trim() === "") return;
+
+        this.serialBloc.sendData(val);
+        // Echo to output locally. Real bug: this was `\\n` (a literal
+        // backslash followed by "n", two visible characters) instead of an
+        // actual newline `\n` -- every local echo showed the literal text
+        // "\n" instead of breaking the line.
+        if (this.serialOutput) {
+            this.serialOutput.innerText += `> ${val}\n`;
+            this.serialOutput.scrollTop = this.serialOutput.scrollHeight;
+        }
+        this.serialInput.value = '';
     }
 
     initEventListeners() {
@@ -25,19 +47,18 @@ export class SerialUI {
 
         if (this.serialInput) {
             this.serialInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    const val = this.serialInput.value;
-                    if (val.trim() !== "") {
-                        this.serialBloc.sendData(val);
-                        // Echo to output locally
-                        if (this.serialOutput) {
-                            this.serialOutput.innerText += `> ${val}\\n`;
-                            this.serialOutput.scrollTop = this.serialOutput.scrollHeight;
-                        }
-                        this.serialInput.value = '';
-                    }
-                }
+                if (e.key === 'Enter') this.sendCurrentInput();
             });
+        }
+
+        if (this.serialSendBtn) {
+            this.serialSendBtn.onclick = () => this.sendCurrentInput();
+        }
+
+        if (this.serialClearBtn) {
+            this.serialClearBtn.onclick = () => {
+                if (this.serialOutput) this.serialOutput.innerText = '';
+            };
         }
     }
 
@@ -51,7 +72,7 @@ export class SerialUI {
 
         globalEventBus.on('FLASH_PROGRESS', (payload) => {
             if (this.serialOutput) {
-                this.serialOutput.innerText += `\\nFlashing... ${payload.progress}%\\n`;
+                this.serialOutput.innerText += `\nFlashing... ${payload.progress}%\n`;
                 this.serialOutput.scrollTop = this.serialOutput.scrollHeight;
             }
         });

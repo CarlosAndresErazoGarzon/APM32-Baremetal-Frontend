@@ -645,7 +645,11 @@ export class FileSystemBloc extends Bloc {
         if (projectType !== 'example' || !projectId) return null;
 
         try {
-            const indexRes = await fetch('examples/index.json');
+            // no-store: a stale browser-cached copy of an example file here
+            // would make an actually-unmodified project compare as
+            // "different" forever (or vice versa) -- this check only means
+            // anything if it's always against the server's current copy.
+            const indexRes = await fetch('examples/index.json', { cache: 'no-store' });
             if (!indexRes.ok) return null;
             const examplesList = await indexRes.json();
             const example = examplesList.find(e => e.id === projectId);
@@ -656,7 +660,7 @@ export class FileSystemBloc extends Bloc {
             if (!example.files.every(f => currentFiles.includes(f))) return null;
 
             for (const file of example.files) {
-                const res = await fetch(`examples/${projectId}/${file}`);
+                const res = await fetch(`examples/${projectId}/${file}`, { cache: 'no-store' });
                 if (!res.ok) return null;
                 const original = await res.text();
                 if (original !== virtualFS[file]) return null;
