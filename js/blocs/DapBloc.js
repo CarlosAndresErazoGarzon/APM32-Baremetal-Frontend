@@ -15,6 +15,49 @@ const DHCSR = 0xE000EDF0;
 const AIRCR = 0xE000ED0C;
 const AIRCR_SYSRESETREQ = 0x05FA0004;
 
+// --- RAM-resident flash algorithm ---
+// Real bottleneck this fixes: the original write loop did one full SWD/USB
+// round trip PER HALFWORD (write it, then poll FLASH_SR for BSY) -- ~17,000
+// round trips for a 33KB firmware, which is what actually dominated flash
+// time (not which of compile vs. prebuilt produced the bin, and only
+// partly the SWD clock speed). OpenOCD's stm32f1x driver is fast for the
+// same reason this is: it loads a tiny algorithm into the target's own
+// SRAM and lets the CPU run the write+poll loop at full core speed,
+// talking to the debugger only once per CHUNK instead of once per halfword.
+//
+// Source (compiled with arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -O1
+// -ffreestanding -nostdlib, linked flat at ALGO_BASE, verified via
+// objdump -- no stack usage at all, so no SP setup needed before running
+// it):
+//
+//   void flash_algo(uint16_t *src, uint16_t *dst, uint32_t count) {
+//       volatile uint32_t *FLASH_SR = (volatile uint32_t *)0x4002200C;
+//       volatile uint32_t *FLASH_CR = (volatile uint32_t *)0x40022010;
+//       for (uint32_t i = 0; i < count; i++) {
+//           dst[i] = src[i];
+//           while (*FLASH_SR & 0x1) { } // wait BSY
+//       }
+//       *FLASH_CR &= ~0x1; // clear PG
+//       __asm volatile ("bkpt #0"); // halts the core -- our "done" signal
+//       while (1) { }
+//   }
+//
+// R0/R1/R2 (src/dst/count) and PC are set via the standard Cortex-M debug
+// core-register interface before each chunk's run; FLASH_CR's PG bit must
+// already be set by the caller (the algorithm only clears it at the end).
+const FLASH_ALGO = new Uint8Array([
+    0x72, 0xb1, 0x02, 0x38, 0x02, 0x39, 0x00, 0xeb, 0x42, 0x0c, 0x09, 0x4a, 0x30, 0xf8, 0x02, 0x3f,
+    0x21, 0xf8, 0x02, 0x3f, 0xd3, 0x68, 0x13, 0xf0, 0x01, 0x0f, 0xfb, 0xd1, 0x60, 0x45, 0xf5, 0xd1,
+    0x03, 0x4a, 0x13, 0x69, 0x23, 0xf0, 0x01, 0x03, 0x13, 0x61, 0x00, 0xbe, 0xfe, 0xe7, 0x00, 0xbf,
+    0x00, 0x20, 0x02, 0x40
+]);
+const ALGO_BASE = 0x20000000;          // start of SRAM
+const DATA_BASE = 0x20000040;          // 64 bytes in -- well past the 52-byte algo
+const CHUNK_BYTES = 2048;              // conservative for now -- see _waitForAlgoDone
+
+// Core register selector numbers (ARMv7-M DCRSR REGSEL encoding).
+const REG_R0 = 0, REG_R1 = 1, REG_R2 = 2, REG_PC = 15;
+
 /**
  * DapBloc
  * Owns the WebUSB link to the DAPLink probe (SWD debug/flash access) --
@@ -76,11 +119,19 @@ export class DapBloc extends Bloc {
             await transport.open();
 
             // eslint-disable-next-line no-undef
-            const processor = new DAPjs.CortexM(transport, 0, 100000);
+            // 1MHz, not 100kHz -- this is the same probe+chip combo the
+            // VS Code extension's OpenOCD config (`adapter speed 1000`)
+            // already runs reliably at 1MHz, and the 10x higher clock cuts
+            // meaningfully into the real bottleneck below: _flashAPM32
+            // does one SWD transaction per 2 bytes (write the halfword,
+            // then poll FLASH_SR for BSY), so a 33KB firmware is ~17,000
+            // round trips -- that's what actually dominates flash time,
+            // far more than which of compile vs. prebuilt produced the bin.
+            const processor = new DAPjs.CortexM(transport, 0, 1000000);
             await processor.connect();
 
             this.emit({ isConnected: true, processor });
-            globalEventBus.emit('LOG', { message: "Connected via WebUSB (SWD: 100kHz).", type: 'success' });
+            globalEventBus.emit('LOG', { message: "Connected via WebUSB (SWD: 1MHz).", type: 'success' });
             this._startRegisterPolling();
         } catch (err) {
             globalEventBus.emit('LOG', { message: "USB Error: " + err.message, type: 'error' });
@@ -132,8 +183,41 @@ export class DapBloc extends Bloc {
             globalEventBus.emit('LOG', { message: "Rebooting device...", type: 'info' });
             await processor.writeMem32(AIRCR, AIRCR_SYSRESETREQ);
             globalEventBus.emit('LOG', { message: "Device restarted successfully with your new code!", type: 'success' });
+        } catch (err) {
+            // Real reported bug: this had no catch at all -- an exception
+            // here (e.g. the flash algorithm timing out) just vanished into
+            // an unhandled promise rejection, so the UI looked "stuck" at
+            // whatever log line printed last instead of showing an error.
+            globalEventBus.emit('LOG', { message: `Flash error: ${err.message}`, type: 'error' });
         } finally {
             this.emit({ isFlashing: false });
+        }
+    }
+
+    // Standalone "Reboot" button -- the same software system reset flash()
+    // already does after programming (processor.reset() + AIRCR
+    // SYSRESETREQ), just without a flash in between. Works today with no
+    // extra wiring; if the probe's RST line ever gets wired to the
+    // target's NRST, this becomes a true hardware reset for free -- dapjs
+    // would route it through the adapter's physical reset line instead,
+    // same call site.
+    async resetBoard() {
+        if (!this.state.processor) {
+            globalEventBus.emit('LOG', { message: "Connect via LINK first.", type: 'error' });
+            return;
+        }
+        if (this.state.isFlashing) {
+            globalEventBus.emit('LOG', { message: "Cannot reset while a flash is in progress.", type: 'error' });
+            return;
+        }
+
+        try {
+            globalEventBus.emit('LOG', { message: "Resetting device...", type: 'info' });
+            await this.state.processor.reset();
+            await this.state.processor.writeMem32(AIRCR, AIRCR_SYSRESETREQ);
+            globalEventBus.emit('LOG', { message: "Device reset.", type: 'success' });
+        } catch (err) {
+            globalEventBus.emit('LOG', { message: "Reset error: " + err.message, type: 'error' });
         }
     }
 
@@ -143,6 +227,15 @@ export class DapBloc extends Bloc {
     // to work regardless of transport. This talks straight to the flash
     // controller instead: unlock, mass-erase, program halfwords from the
     // base flash address, matching the pre-refactor implementation.
+    //
+    // Slow (one SWD round trip per halfword written -- see
+    // _flashAPM32FastExperimental for why), but proven reliable on every
+    // example size tested so far. A RAM-resident flash-algorithm version
+    // was tried to fix that (see below) but hung indefinitely partway
+    // through larger binaries in real testing, for a reason that needs
+    // browser devtools console output to diagnose further (nothing threw,
+    // so nothing could be logged) -- reverted to this one so uploading
+    // still works while that gets investigated separately.
     async _flashAPM32(processor, binArrayBuffer) {
         globalEventBus.emit('LOG', { message: "[FMC] Unlocking flash...", type: 'info' });
         await processor.writeMem32(FLASH_KEYR, 0x45670123);
@@ -181,6 +274,103 @@ export class DapBloc extends Bloc {
         await processor.writeMem32(FLASH_CR, 0x00000000); // Clear PG
         globalEventBus.emit('LOG', { message: "[FMC] Programming completed successfully.", type: 'success' });
         globalEventBus.emit('FLASH_PROGRESS', { progress: 100 });
+    }
+
+    // EXPERIMENTAL / not currently called by flash() -- see the comment on
+    // _flashAPM32 above. Loads a tiny RAM-resident algorithm (FLASH_ALGO)
+    // once, then per chunk: bulk-writes the chunk into SRAM, points R0/R1/
+    // R2/PC at it, and lets the CPU run the write+poll loop at full core
+    // speed instead of one SWD round trip per halfword. Worked completely
+    // for small binaries (single chunk); hung with no thrown error partway
+    // through larger ones in real testing. Kept here, unused, so whoever
+    // picks this back up doesn't have to redo the RAM-algorithm plumbing
+    // from scratch -- swap the call in flash() from _flashAPM32 to this
+    // once the hang is understood.
+    async _flashAPM32FastExperimental(processor, binArrayBuffer) {
+        globalEventBus.emit('LOG', { message: "[FMC] Unlocking flash...", type: 'info' });
+        await processor.writeMem32(FLASH_KEYR, 0x45670123);
+        await processor.writeMem32(FLASH_KEYR, 0xCDEF89AB);
+
+        let cr = await processor.readMem32(FLASH_CR);
+        if ((cr & 0x80) !== 0) throw new Error("Failed to unlock Flash");
+
+        globalEventBus.emit('LOG', { message: "[FMC] Erasing memory (Mass Erase)...", type: 'info' });
+        await processor.writeMem32(FLASH_CR, 0x00000004); // Set MER
+        await processor.writeMem32(FLASH_CR, 0x00000044); // Set STRT + MER
+
+        let sr = await processor.readMem32(FLASH_SR);
+        while (sr & 0x01) sr = await processor.readMem32(FLASH_SR); // wait for BSY to clear
+
+        await processor.writeMem32(FLASH_CR, 0x00000000); // Clear MER
+
+        globalEventBus.emit('LOG', { message: `[FMC] Writing binary (${binArrayBuffer.byteLength} bytes)...`, type: 'info' });
+
+        // Load the flash algorithm into SRAM once -- it's the same 52 bytes
+        // for every chunk, only the data buffer changes below.
+        await this._writeRamBlock(processor, ALGO_BASE, FLASH_ALGO);
+
+        const fullData = new Uint8Array(binArrayBuffer);
+        const totalBytes = fullData.length;
+        let offset = 0;
+        let flashAddr = FLASH_BASE_ADDR;
+
+        while (offset < totalBytes) {
+            const chunkLen = Math.min(CHUNK_BYTES, totalBytes - offset);
+            const chunk = fullData.subarray(offset, offset + chunkLen);
+
+            await this._writeRamBlock(processor, DATA_BASE, chunk);
+
+            // PG must be set before each run -- the algorithm clears it
+            // again right before its own BKPT, every time it finishes.
+            await processor.writeMem32(FLASH_CR, 0x00000001);
+
+            await processor.writeCoreRegister(REG_R0, DATA_BASE);
+            await processor.writeCoreRegister(REG_R1, flashAddr);
+            await processor.writeCoreRegister(REG_R2, chunkLen / 2); // halfword count
+            await processor.writeCoreRegister(REG_PC, ALGO_BASE);
+
+            await processor.resume(false);
+            await this._waitForAlgoDone(processor);
+
+            offset += chunkLen;
+            flashAddr += chunkLen;
+
+            const pct = Math.round((offset / totalBytes) * 100);
+            globalEventBus.emit('LOG', { message: `Write progress: ${pct}%`, type: 'info' });
+            globalEventBus.emit('FLASH_PROGRESS', { progress: pct });
+        }
+
+        globalEventBus.emit('LOG', { message: "[FMC] Programming completed successfully.", type: 'success' });
+        globalEventBus.emit('FLASH_PROGRESS', { progress: 100 });
+    }
+
+    // Bulk-writes arbitrary bytes into target RAM via the MEM-AP's TAR
+    // auto-increment block transfer (dapjs's writeBlock) instead of one
+    // writeMem32 per word -- padded up to a whole number of 32-bit words
+    // first since writeBlock operates on a Uint32Array; any padding past
+    // the real byte count just sits unused in SRAM.
+    async _writeRamBlock(processor, address, byteData) {
+        const padded = new Uint8Array(Math.ceil(byteData.length / 4) * 4);
+        padded.set(byteData);
+        await processor.writeBlock(address, new Uint32Array(padded.buffer));
+    }
+
+    // The flash algorithm halts the core itself (BKPT) the instant it's
+    // done with its chunk -- cheaper to poll for that once per chunk than
+    // to poll FLASH_SR over SWD once per halfword like the old loop did.
+    async _waitForAlgoDone(processor) {
+        for (let i = 0; i < 4000; i++) {
+            if (await processor.isHalted()) return;
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+
+        // Timed out -- log raw DHCSR/FLASH_SR so a stuck run leaves actual
+        // evidence instead of nothing, since this can't be reproduced or
+        // debugged further without real hardware in front of it.
+        let dhcsr = 'unreadable', sr = 'unreadable';
+        try { dhcsr = '0x' + (await processor.readMem32(DHCSR)).toString(16); } catch { /* ignore */ }
+        try { sr = '0x' + (await processor.readMem32(FLASH_SR)).toString(16); } catch { /* ignore */ }
+        throw new Error(`Flash algorithm did not complete in time (DHCSR=${dhcsr}, FLASH_SR=${sr})`);
     }
 
     // Self-rescheduling setTimeout chain (not setInterval) -- a slow read

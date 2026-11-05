@@ -13,6 +13,7 @@ export class HardwareUI {
         this.connectBtn = document.getElementById('connectBtn');
         this.disconnectBtn = document.getElementById('disconnectBtn');
         this.flashBtn = document.getElementById('flashBtn');
+        this.resetBoardBtn = document.getElementById('resetBoardBtn');
         this.coreStateTag = document.getElementById('coreStateTag');
 
         this.recoveryModal = document.getElementById('recoveryModal');
@@ -30,6 +31,10 @@ export class HardwareUI {
 
         if (this.disconnectBtn) {
             this.disconnectBtn.onclick = () => this.dapBloc.disconnect();
+        }
+
+        if (this.resetBoardBtn) {
+            this.resetBoardBtn.onclick = () => this.dapBloc.resetBoard();
         }
 
         if (this.recoveryModeBtn && this.recoveryModal) {
@@ -57,6 +62,12 @@ export class HardwareUI {
             this.flashBtn.disabled = !state.isConnected;
             this.flashBtn.classList.toggle('opacity-50', !state.isConnected);
             this.flashBtn.classList.toggle('cursor-not-allowed', !state.isConnected);
+        }
+
+        if (this.resetBoardBtn) {
+            this.resetBoardBtn.disabled = !state.isConnected;
+            this.resetBoardBtn.classList.toggle('opacity-50', !state.isConnected);
+            this.resetBoardBtn.classList.toggle('cursor-not-allowed', !state.isConnected);
         }
 
         this.updateCoreState(state.coreState);
