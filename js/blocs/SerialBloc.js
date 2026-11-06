@@ -84,7 +84,7 @@ export class SerialBloc extends Bloc {
         try {
             const encoder = new TextEncoder();
             const writer = port.writable.getWriter();
-            await writer.write(encoder.encode(dataStr + '\\r\\n'));
+            await writer.write(encoder.encode(dataStr + '\r\n'));
             writer.releaseLock();
         } catch (err) {
             globalEventBus.emit('LOG', { message: "Write Error: " + err.message, type: 'error' });
