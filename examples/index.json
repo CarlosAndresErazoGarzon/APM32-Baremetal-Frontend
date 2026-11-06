@@ -142,7 +142,7 @@
     {
         "id": "fsm_toggle",
         "name": "Table-Driven FSM (Toggle)",
-        "description": "Hardware port of the class example (11_mquinas/fsm_table.c): the same State/Event/Cell table and fsm_dispatch() pattern, but EV_BTN now comes from a debounced PA10 and the actions drive PB2 instead of printf.",
+        "description": "A State/Event/Cell transition table dispatched through fsm_dispatch(): EV_BTN comes from a debounced PA10, and the actions drive PB2.",
         "files": [
             "src/main.c",
             "src/apm32_config.c",

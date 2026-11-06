@@ -3,9 +3,8 @@
 #include "delay.h"
 
 /* USER CODE BEGIN Includes */
-// Same table-driven FSM pattern from class (11_mquinas/fsm_table.c), ported
-// from printf/getchar to real GPIO: the "events" come from a debounced
-// button instead of stdin, and the "actions" drive PB2 instead of puts().
+// Table-driven FSM pattern: the "events" come from a debounced button
+// instead of stdin, and the "actions" drive PB2 instead of puts().
 #define DEBOUNCE_MS 15
 
 typedef enum { ST_OFF, ST_ON, ST__N } State;
