@@ -112,6 +112,25 @@
         ]
     },
     {
+        "id": "binary_manipulator_fsm",
+        "name": "Binary Manipulator -- FSM Modular",
+        "description": "Same Taller 2 assignment as Binary Manipulator, refactored into a real table-driven FSM (6 cursor states x EV_LEFT/EV_RIGHT/EV_TOGGLE/EV_RESET) split across fsm.c/montaje.c, with every pin resolved through one indexed PINES[] table in board_pins.h instead of scattered #defines. Also reports every state change over UART and accepts 'a'/'d'/'t'/'r' from the serial keyboard as alternates to the physical buttons.",
+        "files": [
+            "src/main.c",
+            "src/apm32_config.c",
+            "src/delay.c",
+            "src/fsm.c",
+            "src/montaje.c",
+            "src/uart.c",
+            "inc/apm32_config.h",
+            "inc/board_pins.h",
+            "inc/delay.h",
+            "inc/fsm.h",
+            "inc/montaje.h",
+            "inc/uart.h"
+        ]
+    },
+    {
         "id": "eint_button",
         "name": "External Interrupt (EINT) Button",
         "description": "Reacts to a button press via a real hardware interrupt on EINT line 10 (PA10) instead of polling IDATA -- PB2 toggles instantly inside the ISR, while the main loop keeps blinking its own heartbeat on PA8, completely untouched.",
